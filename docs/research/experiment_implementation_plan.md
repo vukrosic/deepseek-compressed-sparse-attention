@@ -190,7 +190,23 @@ Use them only when CUDA is available.
 
 ## 5. Pilot Run
 
-Before the sweep, run a short pilot:
+Before the NVIDIA sweep, run a Mac smoke pilot using synthetic data:
+
+```bash
+python -m experiments.csa_top_k_sweep \
+  --mode pilot \
+  --config_class configs.research_configs.CSAMacSmokeConfig \
+  --synthetic_data true \
+  --train_tokens 8192 \
+  --batch_size 4 \
+  --num_workers 0 \
+  --compile false \
+  --warmup false
+```
+
+This proves the code path works. It is not a paper result.
+
+Then run a short real-data NVIDIA pilot:
 
 ```text
 dense, 200k tokens
@@ -266,4 +282,3 @@ Dense attention remained stronger at seq_len=2048, but CSA showed a monotonic
 quality recovery as top_k increased. This suggests the selector/compressor path
 is functioning, while speed claims require longer contexts or custom kernels.
 ```
-

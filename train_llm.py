@@ -211,10 +211,16 @@ def main():
     parser.add_argument("--load_checkpoint", type=str, help="Path to checkpoint file to load weights from")
     parser.add_argument("--compile", type=str, help="Whether to compile the model (true/false)")
     parser.add_argument("--dataset_path", type=str, help="Path to preprocessed dataset directory")
+    parser.add_argument("--synthetic_data", choices=["true", "false"], default="false", help="Use a deterministic synthetic dataset for local smoke runs")
+    parser.add_argument("--synthetic_train_sequences", type=int, default=256, help="Synthetic train sequence count")
+    parser.add_argument("--synthetic_val_sequences", type=int, default=64, help="Synthetic validation sequence count")
+    parser.add_argument("--synthetic_pattern", choices=["copy_lag", "counting"], default="copy_lag", help="Synthetic sequence pattern")
+    parser.add_argument("--synthetic_lag", type=int, default=32, help="Lag used by the copy_lag synthetic pattern")
     parser.add_argument("--eval_every", type=int, help="Override eval_every steps")
     parser.add_argument("--save_every", type=int, help="Override save_every steps")
     parser.add_argument("--batch_size", type=int, help="Override batch_size")
     parser.add_argument("--gradient_accumulation_steps", type=int, help="Override gradient_accumulation_steps")
+    parser.add_argument("--num_workers", type=int, default=2, help="DataLoader worker count")
     parser.add_argument("--log_every", type=int, default=100, help="Logging frequency in steps")
     parser.add_argument("--max_train_seconds", type=float, help="Stop after this many active training seconds")
     parser.add_argument("--warmup", type=str, default="true", help="Whether to perform untimed compilation warmup (true/false)")
@@ -345,26 +351,47 @@ def main():
     
     num_docs = calc_num_docs
 
-    print("Loading dataset with Hugging Face Datasets API...")
-    data_cfg = DataConfig(
-        dataset_path=args.dataset_path if args.dataset_path else "auto",
-        seq_length=config.max_seq_len,
-        num_samples=num_docs,
-        cache_dir="./hf_cache",
-    )
-    
-    # Show which dataset was resolved (especially useful for auto-detection)
-    if not args.dataset_path:
-        print(f"📂 Auto-detected dataset: {data_cfg.dataset_path}")
+    if args.synthetic_data == "true":
+        from data.synthetic import SyntheticCausalDataset
 
-    from data.loader import setup_tokenizer
-    
-    # Setup tokenizer first to get vocab size
-    tokenizer = setup_tokenizer(data_cfg)
-    config.vocab_size = tokenizer.vocab_size
+        print("Loading deterministic synthetic dataset for local smoke run...")
+        train_ds = SyntheticCausalDataset(
+            num_sequences=args.synthetic_train_sequences,
+            seq_len=config.max_seq_len,
+            vocab_size=config.vocab_size,
+            pattern=args.synthetic_pattern,
+            lag=args.synthetic_lag,
+            seed=args.seed,
+        )
+        val_ds = SyntheticCausalDataset(
+            num_sequences=args.synthetic_val_sequences,
+            seq_len=config.max_seq_len,
+            vocab_size=config.vocab_size,
+            pattern=args.synthetic_pattern,
+            lag=args.synthetic_lag,
+            seed=args.seed + 10_000,
+        )
+    else:
+        print("Loading dataset with Hugging Face Datasets API...")
+        data_cfg = DataConfig(
+            dataset_path=args.dataset_path if args.dataset_path else "auto",
+            seq_length=config.max_seq_len,
+            num_samples=num_docs,
+            cache_dir="./hf_cache",
+        )
 
-    # Prepare datasets (handles caching automatically)
-    train_ds, val_ds = prepare_datasets(data_cfg, tokenizer)
+        # Show which dataset was resolved (especially useful for auto-detection)
+        if not args.dataset_path:
+            print(f"📂 Auto-detected dataset: {data_cfg.dataset_path}")
+
+        from data.loader import setup_tokenizer
+
+        # Setup tokenizer first to get vocab size
+        tokenizer = setup_tokenizer(data_cfg)
+        config.vocab_size = tokenizer.vocab_size
+
+        # Prepare datasets (handles caching automatically)
+        train_ds, val_ds = prepare_datasets(data_cfg, tokenizer)
     
     logger.info(f"Train sequences: {len(train_ds):,}, Val sequences: {len(val_ds):,}")
 
@@ -374,12 +401,13 @@ def main():
 
     loader_args = dict(
         batch_size=config.batch_size,
-        num_workers=2,
+        num_workers=args.num_workers,
         pin_memory=torch.cuda.is_available(),
-        persistent_workers=True,
         worker_init_fn=worker_init_fn,
         generator=g,
     )
+    if args.num_workers > 0:
+        loader_args["persistent_workers"] = True
     train_loader = DataLoader(train_ds, shuffle=True, **loader_args)
     val_loader = DataLoader(val_ds, shuffle=False, **loader_args)
 

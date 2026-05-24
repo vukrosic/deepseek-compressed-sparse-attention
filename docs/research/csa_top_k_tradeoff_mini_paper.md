@@ -95,9 +95,53 @@ lengths because compression, top-k selection, and gather operations add overhead
 Hypothesis 3 is important. We are measuring the architecture behavior, not
 claiming production kernel speed.
 
-## 4. Model And Hardware
+## 4. Model Size
 
-Base model:
+There are three useful model sizes for this project.
+
+### Mac Smoke Model
+
+This model is only for debugging the code path.
+
+```text
+d_model = 128
+n_heads = 4
+n_layers = 2
+d_ff = 512
+max_seq_len = 128
+vocab_size = 1024
+parameters ~= a few million
+```
+
+Use this on the Mac to prove:
+
+- dense training runs
+- CSA training runs
+- metrics are written
+- the sweep harness launches each run
+- validation loss, throughput, and memory fields appear in JSON
+
+Do not use this model for the paper claim. It is too small and the synthetic
+dataset is too simple.
+
+### Minimum Viable Paper Model
+
+This is the smallest model size I would trust for a real, readable result.
+
+```text
+d_model = 256
+n_heads = 8
+n_layers = 8
+d_ff = 1024
+max_seq_len = 2048
+parameters ~= 30M to 40M with the full tokenizer vocabulary
+```
+
+This should be enough to see whether the top_k curve has a shape, but the result
+will be noisy. If seven days and compute are tight, this is the minimum viable
+paper model.
+
+### Preferred Seven-Day Model
 
 ```text
 d_model = 512
@@ -107,6 +151,20 @@ d_ff = 2048
 max_seq_len = 2048
 parameters ~= 88M
 ```
+
+This is the better target if the GPU can handle it. The curve will be more
+interesting because the model has enough capacity to use longer-range
+information instead of only memorizing the easiest local patterns.
+
+My recommendation:
+
+```text
+Debug on Mac:      CSAMacSmokeConfig
+First real paper:  CSAMinimumPaperConfig if compute is tight
+Better paper:      default 88M config if a 4090/5090 run is practical
+```
+
+## 5. Hardware
 
 Recommended hardware for the seven-day version:
 
@@ -127,7 +185,7 @@ Why:
 - A 48GB workstation/datacenter card is useful if the goal shifts toward longer
   context or larger batches, but it is not required for the first paper.
 
-## 5. Fairness Rules
+## 6. Fairness Rules
 
 top_k increases compute because each query attends to more selected compressed
 vectors. Therefore one fairness rule is not enough.
@@ -146,6 +204,46 @@ If every model sees the same data, which attention setting learns better?
 
 This is the cleanest data comparison, but it is not compute-fair. A larger
 top_k run may spend more GPU time on the same number of tokens.
+
+Why still report this?
+
+Because data is also a budget. If two runs read the same amount of text, we can
+ask which one extracts more learning from that text.
+
+But this graph must be labeled honestly:
+
+```text
+fixed text != fixed compute
+```
+
+The expected shape looks like this:
+
+```text
+validation
+loss
+  ^
+  |  k=1
+  |    *
+  |      k=2
+  |        *
+  |          k=4
+  |            *
+  |              k=8     k=16
+  |                *------*
+  |
+  +--------------------------------> top_k
+       same number of training tokens for every run
+```
+
+The useful lesson from this graph is the knee:
+
+```text
+Where does adding more top_k stop buying much lower validation loss?
+```
+
+The unfair part is visible too. The right side of the graph used more attention
+work per token. That is why the fixed-text graph is evidence, not the headline
+fairness claim.
 
 Fixed:
 
@@ -193,7 +291,7 @@ sanity check that makes the tradeoff easier to interpret.
 If time is tight, run View B first for the main claim and keep View A as a
 diagnostic curve.
 
-## 6. Budget Accounting
+## 7. Budget Accounting
 
 There are two different budgets. Do not mix them.
 
@@ -244,7 +342,7 @@ Example with m = 16 and w = 64:
 
 Coverage is useful for intuition, but it is not the same as compute.
 
-## 7. Experiment Matrix
+## 8. Experiment Matrix
 
 Primary sweep:
 
@@ -260,7 +358,7 @@ Primary sweep:
 If seven days are tight, use one seed for all runs. If the signal is promising,
 repeat the best, worst, and baseline runs with seeds 2 and 3.
 
-## 8. Metrics
+## 9. Metrics
 
 Record these for every run:
 
@@ -278,12 +376,63 @@ Record these for every run:
 
 Do not report only validation loss. CSA is a tradeoff paper.
 
-## 9. Commands
+## 10. Mac Smoke Experiment
+
+Before renting or starting NVIDIA training, run the same experiment machinery on
+the Mac with a tiny config and synthetic data.
+
+This does not answer the paper question. It answers:
+
+```text
+Can the dense/CSA/sweep/metrics path run end to end?
+```
+
+Mac pilot:
+
+```bash
+python -m experiments.csa_top_k_sweep \
+  --mode pilot \
+  --config_class configs.research_configs.CSAMacSmokeConfig \
+  --synthetic_data true \
+  --train_tokens 8192 \
+  --batch_size 4 \
+  --num_workers 0 \
+  --compile false \
+  --warmup false
+```
+
+Mac full debug sweep:
+
+```bash
+python -m experiments.csa_top_k_sweep \
+  --mode full \
+  --config_class configs.research_configs.CSAMacSmokeConfig \
+  --synthetic_data true \
+  --train_tokens 8192 \
+  --batch_size 4 \
+  --num_workers 0 \
+  --compile false \
+  --warmup false
+```
+
+What to check:
+
+- every run exits with return code 0
+- every run writes `metrics.json`
+- `attention_vector_budget` increases with top_k
+- `raw_token_equivalent_coverage` increases faster than attention vectors
+- `tokens_per_second` is present
+
+Ignore Mac timing as a paper result. CPU timing is useful for debugging, not for
+CSA performance claims.
+
+## 11. NVIDIA Commands
 
 Dense baseline:
 
 ```bash
 python train_llm.py \
+  --config_class configs.research_configs.CSAMinimumPaperConfig \
   --attention_impl dense \
   --train_tokens 8000000 \
   --batch_size 8
@@ -293,6 +442,7 @@ CSA example:
 
 ```bash
 python train_llm.py \
+  --config_class configs.research_configs.CSAMinimumPaperConfig \
   --attention_impl csa \
   --csa_compression_block_size 16 \
   --csa_top_k 4 \
@@ -307,13 +457,14 @@ The first real run should be a short smoke test, not the full sweep:
 
 ```bash
 python train_llm.py \
+  --config_class configs.research_configs.CSAMinimumPaperConfig \
   --attention_impl csa \
   --csa_top_k 1 \
   --train_tokens 200000 \
   --batch_size 4
 ```
 
-## 10. Results
+## 12. Results
 
 Fill this after runs finish.
 
@@ -338,7 +489,7 @@ Charts to make:
 The GPU-hours chart is the fairness chart. The analytical budget charts explain
 why the curve looks the way it does.
 
-## 11. Interpretation Template
+## 13. Interpretation Template
 
 Use this template after results land:
 
@@ -360,12 +511,13 @@ contexts or better sparse kernels, not claim a speed win at small scale.
 
 Negative results are still useful if they teach the tradeoff honestly.
 
-## 12. Seven-Day Schedule
+## 14. Seven-Day Schedule
 
 Day 1:
 
 - Run CPU tests.
-- Run one dense smoke test and one CSA smoke test.
+- Run the Mac synthetic pilot.
+- Run one dense real-data smoke test and one CSA real-data smoke test on NVIDIA.
 - Confirm logs capture validation loss, tokens/sec, and wall time.
 
 Day 2:
@@ -401,7 +553,7 @@ Day 7:
 - Write the tutorial takeaway.
 - Choose the next experiment.
 
-## 13. Limitations
+## 15. Limitations
 
 This mini-paper does not prove DeepSeek-scale speedups.
 
@@ -416,7 +568,7 @@ Main limitations:
 That is okay. The paper is valuable if it produces one honest rule under one
 well-described budget.
 
-## 14. Expected Final Claim Shape
+## 16. Expected Final Claim Shape
 
 The final claim should look like this:
 

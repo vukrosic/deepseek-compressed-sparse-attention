@@ -7,6 +7,8 @@ A high-performance codebase for LLM research, pretraining, and optimization: tes
 - Training script, flexible configuration
 - Blog article: [Build DeepSeek V4's Compressed Sparse Attention](docs/tutorial.md)
 - Paper PDF: [papers/DeepSeek_V4.pdf](papers/DeepSeek_V4.pdf)
+- CSA mini-paper plan: [docs/research/csa_top_k_tradeoff_mini_paper.md](docs/research/csa_top_k_tradeoff_mini_paper.md)
+- GPU runbook: [docs/research/gpu_runbook.md](docs/research/gpu_runbook.md)
 
 - `models/`: Transformer layers and components (RoPE, RMSNorm, Multi-Head Attention).
 - `optimizers/`: Muon optimizer (outperforms AdamW and all others).

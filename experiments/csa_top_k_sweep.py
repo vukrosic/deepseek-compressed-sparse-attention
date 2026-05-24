@@ -40,12 +40,31 @@ def build_command(args, attention_impl: str, top_k: int | None, output_dir: Path
         args.warmup,
         "--seed",
         str(args.seed),
+        "--num_workers",
+        str(args.num_workers),
         "--output_dir",
         str(output_dir),
     ]
 
+    if args.config_class:
+        command.extend(["--config_class", args.config_class])
     if args.dataset_path:
         command.extend(["--dataset_path", args.dataset_path])
+    if args.synthetic_data == "true":
+        command.extend(
+            [
+                "--synthetic_data",
+                "true",
+                "--synthetic_train_sequences",
+                str(args.synthetic_train_sequences),
+                "--synthetic_val_sequences",
+                str(args.synthetic_val_sequences),
+                "--synthetic_pattern",
+                args.synthetic_pattern,
+                "--synthetic_lag",
+                str(args.synthetic_lag),
+            ]
+        )
     if args.max_train_seconds is not None:
         command.extend(["--max_train_seconds", str(args.max_train_seconds)])
     if attention_impl == "csa":
@@ -109,6 +128,13 @@ def main() -> None:
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1)
     parser.add_argument("--dataset_path")
+    parser.add_argument("--config_class")
+    parser.add_argument("--synthetic_data", choices=["true", "false"], default="false")
+    parser.add_argument("--synthetic_train_sequences", type=int, default=256)
+    parser.add_argument("--synthetic_val_sequences", type=int, default=64)
+    parser.add_argument("--synthetic_pattern", choices=["copy_lag", "counting"], default="copy_lag")
+    parser.add_argument("--synthetic_lag", type=int, default=32)
+    parser.add_argument("--num_workers", type=int, default=2)
     parser.add_argument("--compile", choices=["true", "false"], default="false")
     parser.add_argument("--warmup", choices=["true", "false"], default="false")
     parser.add_argument("--seed", type=int, default=42)
@@ -142,4 +168,3 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
-
