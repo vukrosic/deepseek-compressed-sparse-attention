@@ -790,6 +790,15 @@ This is where the tutorial becomes real AI research.
 You are no longer just copying a paper. You are changing one architectural choice,
 holding the rest fixed, and measuring whether the change improves the tradeoff.
 
+The companion mini-paper draft lives here:
+
+```text
+docs/research/csa_top_k_tradeoff_mini_paper.md
+```
+
+Read that file as the research notebook and paper skeleton. This section explains
+the loop; the mini-paper records the actual experiment contract and results.
+
 ### The first serious experiment: sweep `top_k`
 
 Keep everything fixed except `top_k`.
