@@ -631,6 +631,7 @@ def train_minimal_llm(
         'peak_cuda_memory_reserved_bytes': peak_cuda_memory_reserved,
         'train_tokens': config.train_tokens,
         'experiment_metadata': experiment_metadata,
+        'experiment_config': experiment_metadata,
         'history': metrics_history,
     }
     with open(metrics_file, 'w') as f:
