@@ -15,11 +15,10 @@ large-model hyperparameters, but it does not publish a small-model top_k sweep
 that shows the quality, speed, and memory tradeoff under limited compute.
 
 We study that tradeoff in an 88M-parameter Transformer implementation of CSA.
-Holding model size, dataset, sequence length, optimizer, and training budget
-fixed, we vary only the number of selected compressed blocks, top_k. We compare
-dense attention against CSA with top_k in {1, 2, 4, 8, 16}. We report validation
-loss, throughput, peak VRAM, wall-clock time, and selected-token budget per
-query.
+We vary only the number of selected compressed blocks, top_k. We compare dense
+attention against CSA with top_k in {1, 2, 4, 8, 16}. We report validation loss,
+throughput, peak VRAM, wall-clock time, an analytical attention-vector budget,
+and raw-token-equivalent coverage.
 
 Expected contribution: a practical rule for small-model CSA, such as "quality
 improves with top_k but saturates after X under this compute budget."
@@ -131,11 +130,11 @@ Why:
 ## 5. Fairness Rules
 
 top_k increases compute because each query attends to more selected compressed
-blocks. Therefore one fairness rule is not enough.
+vectors. Therefore one fairness rule is not enough.
 
-We use two views.
+We use three views.
 
-### View A: Fixed Training Tokens
+### View A: Fixed Training Tokens, Data-Normalized
 
 Every run trains on the same number of tokens.
 
@@ -145,7 +144,8 @@ This answers:
 If every model sees the same data, which attention setting learns better?
 ```
 
-This is the cleanest architecture comparison.
+This is the cleanest data comparison, but it is not compute-fair. A larger
+top_k run may spend more GPU time on the same number of tokens.
 
 Fixed:
 
@@ -164,7 +164,7 @@ Changed:
 - attention implementation
 - top_k for CSA runs
 
-### View B: Fixed GPU-Hours
+### View B: Fixed GPU-Hours, Compute-Normalized
 
 Every run gets the same wall-clock GPU budget.
 
@@ -174,28 +174,67 @@ This answers:
 If I only have N GPU-hours, which setting gives the best validation loss?
 ```
 
-This is the practical compute comparison.
+This is the practical compute comparison. It answers the question a learner
+actually has when renting one GPU for a weekend.
 
-If time is tight, run View A first. If the signal is interesting, add View B for
-the strongest two or three settings.
+### View C: Analytical Attention Budget, FLOPs Proxy
 
-## 6. Selected-Token Budget
+For every run, compute a simple attention-budget proxy from the attention pattern.
 
-For a CSA run, the rough selected-token budget per query is:
+This answers:
 
 ```text
-budget = top_k * m + w
+How much attention work did this setting ask the model to do per query?
+```
+
+This is not a replacement for wall-clock time. It is a hardware-independent
+sanity check that makes the tradeoff easier to interpret.
+
+If time is tight, run View B first for the main claim and keep View A as a
+diagnostic curve.
+
+## 6. Budget Accounting
+
+There are two different budgets. Do not mix them.
+
+### Actual Attention-Vector Budget
+
+This is what the implemented attention layer reads:
+
+```text
+attention_vectors = top_k + w
 ```
 
 where:
 
-- m is the compression block size.
 - w is the sliding window size.
-- top_k is the number of compressed blocks selected.
+- top_k is the number of compressed summary vectors selected.
 
 Example with m = 16 and w = 64:
 
-| top_k | Selected-token budget |
+| top_k | Attention-vector budget |
+| ---: | ---: |
+| 1 | 65 |
+| 2 | 66 |
+| 4 | 68 |
+| 8 | 72 |
+| 16 | 80 |
+
+Dense attention at sequence length 2048 reads a causal set whose average size is
+about 1024 previous-token positions per query. CSA is intentionally reading a
+much smaller number of vectors.
+
+### Raw-Token-Equivalent Coverage
+
+This is how much old text the selected summaries cover:
+
+```text
+coverage = top_k * m + w
+```
+
+Example with m = 16 and w = 64:
+
+| top_k | Raw-token-equivalent coverage |
 | ---: | ---: |
 | 1 | 80 |
 | 2 | 96 |
@@ -203,8 +242,7 @@ Example with m = 16 and w = 64:
 | 8 | 192 |
 | 16 | 320 |
 
-Dense attention at sequence length 2048 can read up to 2048 previous-token
-positions. CSA is intentionally reading a much smaller set.
+Coverage is useful for intuition, but it is not the same as compute.
 
 ## 7. Experiment Matrix
 
@@ -279,24 +317,26 @@ python train_llm.py \
 
 Fill this after runs finish.
 
-| Run | Val loss | PPL | Tokens/sec | Peak VRAM | Wall time | Selected budget |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| dense | | | | | | 2048 |
-| csa-k1 | | | | | | 80 |
-| csa-k2 | | | | | | 96 |
-| csa-k4 | | | | | | 128 |
-| csa-k8 | | | | | | 192 |
-| csa-k16 | | | | | | 320 |
+| Run | Val loss | PPL | Tokens/sec | Peak VRAM | GPU-hours | Attention vectors | Coverage |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| dense | | | | | | ~1024 avg | 2048 max |
+| csa-k1 | | | | | | 65 | 80 |
+| csa-k2 | | | | | | 66 | 96 |
+| csa-k4 | | | | | | 68 | 128 |
+| csa-k8 | | | | | | 72 | 192 |
+| csa-k16 | | | | | | 80 | 320 |
 
 Charts to make:
 
 1. Validation loss vs top_k.
 2. Tokens/sec vs top_k.
 3. Peak VRAM vs top_k.
-4. Validation loss vs selected-token budget.
+4. Validation loss vs attention-vector budget.
 5. Validation loss vs GPU-hours.
+6. Validation loss vs raw-token-equivalent coverage.
 
-The last chart is the fairness chart.
+The GPU-hours chart is the fairness chart. The analytical budget charts explain
+why the curve looks the way it does.
 
 ## 11. Interpretation Template
 
@@ -304,9 +344,9 @@ Use this template after results land:
 
 ```text
 Increasing top_k from A to B improved validation loss from X to Y, but the gain
-from B to C was small. Throughput decreased from P to Q tokens/sec and peak VRAM
-increased from R to S GB. Under this budget, top_k=B appears to be the knee of
-the curve.
+from B to C was small. Throughput changed from P to Q tokens/sec and peak VRAM
+changed from R to S GB. Under the fixed GPU-hour budget, top_k=B appears to be
+the knee of the curve.
 ```
 
 If CSA loses to dense attention, say that clearly:
@@ -381,10 +421,10 @@ well-described budget.
 The final claim should look like this:
 
 ```text
-On an 88M model trained for X tokens at sequence length 2048, CSA quality
-improved as top_k increased from 1 to K, but returns saturated after K. The
-best quality/compute tradeoff was top_k=K because it recovered Y% of the dense
-baseline quality while using Z selected-token budget and W GPU-hours.
+On an 88M model at sequence length 2048, CSA quality improved as top_k increased
+from 1 to K, but returns saturated after K. The best quality/compute tradeoff
+was top_k=K because it recovered Y% of the dense baseline quality under the same
+GPU-hour budget, while using Z attention vectors per query and W GB peak VRAM.
 ```
 
 Do not write:
@@ -399,4 +439,3 @@ Write:
 Under this small-compute setup, top_k controls a measurable quality/compute
 tradeoff, and the knee of the curve was around K.
 ```
-
