@@ -10,6 +10,7 @@ A high-performance codebase for LLM research, pretraining, and optimization: tes
 - CSA mini-paper plan: [docs/research/csa_top_k_tradeoff_mini_paper.md](docs/research/csa_top_k_tradeoff_mini_paper.md)
 - CSA mini-paper critique: [docs/research/csa_top_k_tradeoff_critique.md](docs/research/csa_top_k_tradeoff_critique.md)
 - CSA saved results: [docs/research/results/csa_top_k_20260524/README.md](docs/research/results/csa_top_k_20260524/README.md)
+- Simple compressed-memory experiment: [docs/research/compressed_memory_simple_experiment.md](docs/research/compressed_memory_simple_experiment.md)
 - GPU runbook: [docs/research/gpu_runbook.md](docs/research/gpu_runbook.md)
 
 - `models/`: Transformer layers and components (RoPE, RMSNorm, Multi-Head Attention).

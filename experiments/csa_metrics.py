@@ -16,6 +16,15 @@ def attention_budget(config) -> Dict[str, float | int | None]:
         }
 
     csa = config.csa
+    if config.attention_impl == "local":
+        window = min(csa.sliding_window_size, seq_len)
+        return {
+            "attention_vector_budget": window,
+            "attention_vector_budget_max": window,
+            "raw_token_equivalent_coverage": window,
+            "dense_avg_causal_budget": seq_len / 2,
+        }
+
     return {
         "attention_vector_budget": csa.sliding_window_size + csa.top_k,
         "attention_vector_budget_max": csa.sliding_window_size + csa.top_k,
@@ -75,7 +84,7 @@ def build_run_metadata(config) -> Dict[str, Any]:
         if config.attention_impl == "csa"
         else None,
         "csa_sliding_window_size": csa.sliding_window_size
-        if config.attention_impl == "csa"
+        if config.attention_impl in {"local", "csa"}
         else None,
         "csa_indexer_heads": csa.indexer_heads if config.attention_impl == "csa" else None,
     }

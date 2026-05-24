@@ -106,6 +106,62 @@ class MultiHeadAttention(nn.Module):
         return F.linear(attn_output, self.qkvo_proj[self.qkv_size:])
 
 
+class LocalSlidingWindowAttention(MultiHeadAttention):
+    """Dense projection path with causal attention restricted to a local window."""
+
+    def __init__(
+        self,
+        d_model: int,
+        n_heads: int,
+        max_seq_len: int,
+        window_size: int,
+        dropout: float = 0.1,
+        n_kv_heads: int | None = None,
+    ):
+        super().__init__(d_model, n_heads, max_seq_len, dropout, n_kv_heads)
+        if window_size <= 0:
+            raise ValueError("window_size must be positive")
+        self.window_size = window_size
+
+    def forward(self, x):
+        batch_size, seq_len = x.size(0), x.size(1)
+
+        qkv = F.linear(x, self.qkvo_proj[:self.qkv_size])
+        Q, K, V = qkv.split([self.q_size, self.kv_size, self.kv_size], dim=-1)
+
+        Q = Q.reshape(batch_size, seq_len, self.n_heads, self.d_k)
+        K = K.reshape(batch_size, seq_len, self.n_kv_heads, self.d_k)
+        V = V.reshape(batch_size, seq_len, self.n_kv_heads, self.d_k)
+
+        Q = self.rotary(self.q_norm(Q))
+        K = self.rotary(self.k_norm(K))
+
+        if self.n_kv_heads != self.n_heads:
+            K = torch.repeat_interleave(K, self.num_key_value_groups, dim=2)
+            V = torch.repeat_interleave(V, self.num_key_value_groups, dim=2)
+
+        Q, K, V = Q.transpose(1, 2), K.transpose(1, 2), V.transpose(1, 2)
+
+        positions = torch.arange(seq_len, device=x.device)
+        query_positions = positions.view(seq_len, 1)
+        key_positions = positions.view(1, seq_len)
+        local_mask = (key_positions <= query_positions) & (
+            key_positions >= query_positions - self.window_size + 1
+        )
+
+        attn_output = F.scaled_dot_product_attention(
+            Q,
+            K,
+            V,
+            attn_mask=local_mask,
+            dropout_p=self.dropout if self.training else 0.0,
+        )
+        attn_output = attn_output.transpose(1, 2).reshape(
+            batch_size, seq_len, self.d_model
+        )
+        return F.linear(attn_output, self.qkvo_proj[self.qkv_size:])
+
+
 class TransformerBlock(nn.Module):
     """Standard transformer block with dense feed-forward"""
 
@@ -124,6 +180,17 @@ class TransformerBlock(nn.Module):
 
         if attention_impl == "dense":
             self.attention = MultiHeadAttention(d_model, n_heads, max_seq_len, dropout, n_kv_heads)
+        elif attention_impl == "local":
+            if csa_config is None:
+                raise ValueError("csa_config is required when attention_impl='local'")
+            self.attention = LocalSlidingWindowAttention(
+                d_model=d_model,
+                n_heads=n_heads,
+                max_seq_len=max_seq_len,
+                window_size=csa_config.sliding_window_size,
+                dropout=dropout,
+                n_kv_heads=n_kv_heads,
+            )
         elif attention_impl == "csa":
             if csa_config is None:
                 raise ValueError("csa_config is required when attention_impl='csa'")

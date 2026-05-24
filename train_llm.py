@@ -225,7 +225,7 @@ def main():
     parser.add_argument("--max_train_seconds", type=float, help="Stop after this many active training seconds")
     parser.add_argument("--warmup", type=str, default="true", help="Whether to perform untimed compilation warmup (true/false)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility (default: 42)")
-    parser.add_argument("--attention_impl", choices=["dense", "csa"], help="Attention implementation to train")
+    parser.add_argument("--attention_impl", choices=["dense", "local", "csa"], help="Attention implementation to train")
     parser.add_argument("--csa_compression_block_size", type=int, help="CSA compression block size m")
     parser.add_argument("--csa_top_k", type=int, help="CSA number of compressed blocks selected per token")
     parser.add_argument("--csa_sliding_window_size", type=int, help="CSA local sliding window size")
@@ -417,6 +417,9 @@ def main():
     print(f"d_model: {config.d_model}, layers: {config.n_layers}, heads: {config.n_heads}")
     print(f"ff dim: {config.d_ff}")
     print(f"attention: {config.attention_impl}")
+    if config.attention_impl in {"local", "csa"}:
+        if config.attention_impl == "local":
+            print(f"local window: {config.csa.sliding_window_size}")
     if config.attention_impl == "csa":
         print(
             "csa: "

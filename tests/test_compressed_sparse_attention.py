@@ -5,6 +5,7 @@ import torch
 from configs.csa_config import CSAConfig
 from configs.llm_config import LLMConfig
 from models.compressed_sparse_attention import CompressedSparseAttention, TokenCompressor
+from models.layers import LocalSlidingWindowAttention
 from models.llm import MinimalLLM
 
 
@@ -98,6 +99,65 @@ class CompressedSparseAttentionTest(unittest.TestCase):
                 indexer_dim=4,
                 output_groups=2,
             ),
+        )
+        model = MinimalLLM(config)
+        input_ids = torch.randint(0, config.vocab_size, (2, config.max_seq_len))
+
+        logits = model(input_ids)
+        self.assertEqual(logits.shape, (2, config.max_seq_len, config.vocab_size))
+
+
+class LocalSlidingWindowAttentionTest(unittest.TestCase):
+    def test_forward_backward_on_cpu(self):
+        torch.manual_seed(2)
+        attention = LocalSlidingWindowAttention(
+            d_model=16,
+            n_heads=4,
+            n_kv_heads=4,
+            max_seq_len=12,
+            window_size=4,
+            dropout=0.0,
+        )
+        hidden = torch.randn(2, 9, 16, requires_grad=True)
+
+        output = attention(hidden)
+        self.assertEqual(output.shape, hidden.shape)
+
+        loss = output.square().mean()
+        loss.backward()
+        self.assertIsNotNone(hidden.grad)
+        self.assertTrue(torch.isfinite(hidden.grad).all())
+
+    def test_local_attention_cannot_read_future_tokens(self):
+        torch.manual_seed(3)
+        attention = LocalSlidingWindowAttention(
+            d_model=16,
+            n_heads=4,
+            n_kv_heads=4,
+            max_seq_len=12,
+            window_size=3,
+            dropout=0.0,
+        )
+        attention.eval()
+        hidden = torch.randn(1, 8, 16)
+        changed_future = hidden.clone()
+        changed_future[:, 5:] = torch.randn_like(changed_future[:, 5:]) * 10
+
+        original = attention(hidden)
+        modified = attention(changed_future)
+        torch.testing.assert_close(original[:, :5], modified[:, :5])
+
+    def test_minimal_llm_uses_local_attention(self):
+        config = LLMConfig(
+            d_model=16,
+            n_heads=4,
+            n_kv_heads=4,
+            n_layers=1,
+            d_ff=32,
+            max_seq_len=12,
+            vocab_size=64,
+            attention_impl="local",
+            csa=CSAConfig(sliding_window_size=4),
         )
         model = MinimalLLM(config)
         input_ids = torch.randint(0, config.vocab_size, (2, config.max_seq_len))

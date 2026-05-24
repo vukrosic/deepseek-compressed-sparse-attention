@@ -15,7 +15,8 @@ class LLMConfig:
     n_kv_heads: int = 4      
 
     # Attention implementation
-    # "dense" keeps the original baseline. "csa" enables Compressed Sparse Attention.
+    # "dense" keeps the original baseline. "local" keeps only a sliding window.
+    # "csa" enables local attention plus compressed old memory.
     attention_impl: str = "dense"
     csa: CSAConfig = field(default_factory=CSAConfig)
     
@@ -59,5 +60,5 @@ class LLMConfig:
     def __post_init__(self):
         self.d_k = self.d_model // self.n_heads
         assert self.d_model % self.n_heads == 0, "d_model must be divisible by n_heads"
-        assert self.attention_impl in {"dense", "csa"}, "attention_impl must be 'dense' or 'csa'"
+        assert self.attention_impl in {"dense", "local", "csa"}, "attention_impl must be 'dense', 'local', or 'csa'"
         self.csa.__post_init__()
