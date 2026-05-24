@@ -5,6 +5,8 @@ A high-performance codebase for LLM research, pretraining, and optimization: tes
 - Modular transformer with GQA, RoPE, and RMSNorm
 - Muon optimizer alongside AdamW
 - Training script, flexible configuration
+- Blog article: [Build DeepSeek V4's Compressed Sparse Attention](docs/tutorial.md)
+- Paper PDF: [papers/DeepSeek_V4.pdf](papers/DeepSeek_V4.pdf)
 
 - `models/`: Transformer layers and components (RoPE, RMSNorm, Multi-Head Attention).
 - `optimizers/`: Muon optimizer (outperforms AdamW and all others).
@@ -81,5 +83,3 @@ Default is an **88M parameter** transformer LLM, you can modify configs.
 - **Weight Tying**: Shared weights between token embeddings and the LM head.
 - **Muon Support**: Architecture optimized for the Muon optimizer's orthogonal updates.
 - **Efficiency**: Designed for `torch.compile` compatibility and mixed-precision (BF16) training.
-
-

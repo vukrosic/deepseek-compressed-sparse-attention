@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torchtune.modules import RotaryPositionalEmbeddings
 from .components import SquaredReLUFeedForward
+from .compressed_sparse_attention import CompressedSparseAttention
 
 
 class Rotary(nn.Module):
@@ -116,10 +117,33 @@ class TransformerBlock(nn.Module):
         max_seq_len: int,
         dropout: float = 0.1,
         n_kv_heads: int | None = None,
+        attention_impl: str = "dense",
+        csa_config = None,
     ):
         super().__init__()
 
-        self.attention = MultiHeadAttention(d_model, n_heads, max_seq_len, dropout, n_kv_heads)
+        if attention_impl == "dense":
+            self.attention = MultiHeadAttention(d_model, n_heads, max_seq_len, dropout, n_kv_heads)
+        elif attention_impl == "csa":
+            if csa_config is None:
+                raise ValueError("csa_config is required when attention_impl='csa'")
+            self.attention = CompressedSparseAttention(
+                d_model=d_model,
+                n_heads=n_heads,
+                max_seq_len=max_seq_len,
+                compression_block_size=csa_config.compression_block_size,
+                top_k=csa_config.top_k,
+                sliding_window_size=csa_config.sliding_window_size,
+                indexer_heads=csa_config.indexer_heads,
+                query_compression_dim=csa_config.query_compression_dim,
+                indexer_dim=csa_config.indexer_dim,
+                output_groups=csa_config.output_groups,
+                group_hidden_dim=csa_config.group_hidden_dim,
+                dropout=dropout,
+            )
+        else:
+            raise ValueError(f"Unknown attention_impl: {attention_impl}")
+
         self.feed_forward = SquaredReLUFeedForward(d_model, d_ff, dropout)
 
         # Normalization layers

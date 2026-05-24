@@ -218,6 +218,15 @@ def main():
     parser.add_argument("--log_every", type=int, default=100, help="Logging frequency in steps")
     parser.add_argument("--warmup", type=str, default="true", help="Whether to perform untimed compilation warmup (true/false)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility (default: 42)")
+    parser.add_argument("--attention_impl", choices=["dense", "csa"], help="Attention implementation to train")
+    parser.add_argument("--csa_compression_block_size", type=int, help="CSA compression block size m")
+    parser.add_argument("--csa_top_k", type=int, help="CSA number of compressed blocks selected per token")
+    parser.add_argument("--csa_sliding_window_size", type=int, help="CSA local sliding window size")
+    parser.add_argument("--csa_indexer_heads", type=int, help="CSA lightning indexer query heads")
+    parser.add_argument("--csa_query_compression_dim", type=int, help="CSA low-rank query dimension")
+    parser.add_argument("--csa_indexer_dim", type=int, help="CSA indexer key/query head dimension")
+    parser.add_argument("--csa_output_groups", type=int, help="CSA grouped output projection groups")
+    parser.add_argument("--csa_group_hidden_dim", type=int, help="CSA per-group hidden projection dimension")
 
     args = parser.parse_args()
 
@@ -261,6 +270,25 @@ def main():
         config.gradient_accumulation_steps = args.gradient_accumulation_steps
     if args.log_every is not None:
         config.log_every = args.log_every
+    if args.attention_impl is not None:
+        config.attention_impl = args.attention_impl
+    if args.csa_compression_block_size is not None:
+        config.csa.compression_block_size = args.csa_compression_block_size
+    if args.csa_top_k is not None:
+        config.csa.top_k = args.csa_top_k
+    if args.csa_sliding_window_size is not None:
+        config.csa.sliding_window_size = args.csa_sliding_window_size
+    if args.csa_indexer_heads is not None:
+        config.csa.indexer_heads = args.csa_indexer_heads
+    if args.csa_query_compression_dim is not None:
+        config.csa.query_compression_dim = args.csa_query_compression_dim
+    if args.csa_indexer_dim is not None:
+        config.csa.indexer_dim = args.csa_indexer_dim
+    if args.csa_output_groups is not None:
+        config.csa.output_groups = args.csa_output_groups
+    if args.csa_group_hidden_dim is not None:
+        config.csa.group_hidden_dim = args.csa_group_hidden_dim
+    config.__post_init__()
     
     # Define custom milestones for validation curves and autosetup logging
     # For 8M benchmark (approx 488 steps)
@@ -355,6 +383,16 @@ def main():
     print("-" * 70)
     print(f"d_model: {config.d_model}, layers: {config.n_layers}, heads: {config.n_heads}")
     print(f"ff dim: {config.d_ff}")
+    print(f"attention: {config.attention_impl}")
+    if config.attention_impl == "csa":
+        print(
+            "csa: "
+            f"m={config.csa.compression_block_size}, "
+            f"top_k={config.csa.top_k}, "
+            f"window={config.csa.sliding_window_size}, "
+            f"indexer_heads={config.csa.indexer_heads}, "
+            f"groups={config.csa.output_groups}"
+        )
     print(f"train tokens: {config.train_tokens:,}")
     print(f"batch size: {config.batch_size}")
     print(f"vocab size: {config.vocab_size}\n")
