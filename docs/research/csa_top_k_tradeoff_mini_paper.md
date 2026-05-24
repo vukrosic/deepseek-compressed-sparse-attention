@@ -3,6 +3,8 @@
 Status: living mini-paper. Results are early and should be treated as pilot
 evidence, not a final claim.
 
+<!-- Note: [2026-05-24 14:17] test note at line 5 -->
+
 ## Abstract
 
 Compressed Sparse Attention (CSA) lets each token attend to a local window plus
@@ -130,14 +132,22 @@ It does not ask:
 Which run used the same compute?
 ```
 
-| Run | top_k | Val loss | PPL | Tok/s | Peak alloc GiB | Attention vectors | Coverage |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| dense | - | 7.0048 | 1101.90 | 21032.8 | 6.18 | 1024 | 2048 |
-| csa-k1 | 1 | 6.9797 | 1074.56 | 12794.4 | 6.83 | 65 | 80 |
-| csa-k2 | 2 | 6.9804 | 1075.37 | 12908.6 | 6.85 | 66 | 96 |
-| csa-k4 | 4 | 6.9850 | 1080.32 | 12814.5 | 6.87 | 68 | 128 |
-| csa-k8 | 8 | 6.9828 | 1077.96 | 12832.9 | 6.91 | 72 | 192 |
-| csa-k16 | 16 | 6.9688 | 1062.93 | 13146.2 | 7.00 | 80 | 320 |
+Time columns:
+
+```text
+active sec = measured trainer time
+total wall sec = setup + training + final evaluation
+harness sec = subprocess elapsed time from the sweep launcher
+```
+
+| Run | top_k | Val loss | PPL | Tokens seen | Tok/s | Active sec | Total wall sec | Harness sec | Peak alloc GiB | Peak reserved GiB | Attention vectors | Coverage |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| dense | - | 7.0048 | 1101.90 | 204,800 | 21032.8 | 9.7 | 10.5 | 39.9 | 6.18 | 6.94 | 1024 | 2048 |
+| csa-k1 | 1 | 6.9797 | 1074.56 | 204,800 | 12794.4 | 16.0 | 16.7 | 25.8 | 6.83 | 7.64 | 65 | 80 |
+| csa-k2 | 2 | 6.9804 | 1075.37 | 204,800 | 12908.6 | 15.9 | 16.7 | 26.0 | 6.85 | 7.64 | 66 | 96 |
+| csa-k4 | 4 | 6.9850 | 1080.32 | 204,800 | 12814.5 | 16.0 | 16.8 | 26.0 | 6.87 | 7.66 | 68 | 128 |
+| csa-k8 | 8 | 6.9828 | 1077.96 | 204,800 | 12832.9 | 16.0 | 16.7 | 26.1 | 6.91 | 7.71 | 72 | 192 |
+| csa-k16 | 16 | 6.9688 | 1062.93 | 204,800 | 13146.2 | 15.6 | 16.3 | 26.1 | 7.00 | 7.80 | 80 | 320 |
 
 Early read:
 
@@ -153,33 +163,37 @@ wall-clock time.
 
 This is the fairer comparison.
 
-Each run gets about `300` active training seconds. This sweep is still running.
+Each run gets about `300` active training seconds.
 
-Completed rows so far:
+Completed rows:
 
-| Run | top_k | Val loss | PPL | Tokens seen | Tok/s | Active sec | Peak alloc GiB | Attention vectors | Coverage |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| dense | - | 4.3713 | 79.15 | 33,275,904 | 109930.2 | 302.7 | 6.18 | 1024 | 2048 |
-| csa-k1 | 1 | 5.4255 | 227.12 | 13,500,416 | 44373.0 | 304.2 | 6.83 | 65 | 80 |
-| csa-k16 | 16 | 5.4287 | 227.85 | 13,574,144 | 44626.6 | 304.2 | 7.00 | 80 | 320 |
+| Run | top_k | Val loss | PPL | Tokens seen | Tok/s | Active sec | Total wall sec | Harness sec | Peak alloc GiB | Peak reserved GiB | Attention vectors | Coverage | Stop reason |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | --- |
+| dense | - | 4.3713 | 79.15 | 33,275,904 | 109930.2 | 302.7 | 303.4 | 312.8 | 6.18 | 6.94 | 1024 | 2048 | max_train_seconds |
+| csa-k1 | 1 | 5.4255 | 227.12 | 13,500,416 | 44373.0 | 304.2 | 305.1 | 314.9 | 6.83 | 7.64 | 65 | 80 | max_train_seconds |
+| csa-k2 | 2 | 5.4255 | 227.13 | 13,524,992 | 44441.9 | 304.3 | 305.2 | 314.5 | 6.85 | 7.64 | 66 | 96 | max_train_seconds |
+| csa-k4 | 4 | 5.4414 | 230.77 | 13,344,768 | 43847.6 | 304.3 | 305.2 | 314.6 | 6.87 | 7.66 | 68 | 128 | max_train_seconds |
+| csa-k8 | 8 | 5.4261 | 227.25 | 14,057,472 | 46198.1 | 304.3 | 305.1 | 314.0 | 6.91 | 7.71 | 72 | 192 | max_train_seconds |
+| csa-k16 | 16 | 5.4287 | 227.85 | 13,574,144 | 44626.6 | 304.2 | 305.1 | 313.8 | 7.00 | 7.80 | 80 | 320 | max_train_seconds |
 
 Early read:
 
 ```text
-At equal GPU time, dense is much better than csa-k1 and csa-k16.
+At equal GPU time, dense is much better than the completed CSA rows.
 ```
 
 That is expected for `csa-k1`: it has only `80` raw-token-equivalent coverage,
 while dense can use the full causal context.
 
-The surprising early signal is that `csa-k16` does not yet improve over
-`csa-k1`, even though it increases coverage from `80` to `320`.
+The surprising early signal is that more `top_k` does not yet improve quality.
+`csa-k16` increases coverage from `80` to `320`, but all CSA validation losses
+stay clustered around `5.43`.
 
 The important next question is:
 
 ```text
-Do the middle values k=2, k=4, and k=8 show any recovery, or is this CSA setup
-not learning useful compressed summaries at this budget?
+Why does extra compressed-history coverage not improve validation loss in this
+budget?
 ```
 
 ## Current Interpretation
@@ -193,15 +207,14 @@ CSA can look strong when every setting sees the same number of tokens.
 The second result says:
 
 ```text
-That is not enough. Under equal GPU time, the strongest compression setting
-trains on fewer tokens and currently loses to dense.
+That is not enough. Under equal GPU time, CSA trains on fewer tokens and loses
+to dense in this setup.
 ```
 
-The early `k=16` result adds one sharper concern:
+The completed CSA sweep adds one sharper concern:
 
 ```text
-More coverage alone did not improve quality in the first completed fixed-time
-CSA rows.
+More coverage alone did not improve quality in the fixed-time CSA rows.
 ```
 
 So the paper's real claim should not be:
@@ -210,12 +223,14 @@ So the paper's real claim should not be:
 CSA beats dense.
 ```
 
-The claim we are testing is:
+The hypothesis we tested is:
 
 ```text
 top_k is a controllable budget knob. Higher top_k should recover quality by
 increasing compressed history coverage, but it may cost memory and throughput.
 ```
+
+This pilot does not support that hypothesis yet.
 
 ## Limitations
 
@@ -224,15 +239,15 @@ increasing compressed history coverage, but it may cost memory and throughput.
 - Short training.
 - Plain PyTorch, not optimized sparse kernels.
 - Sequence length is `2048`, not million-token context.
-- The compute-normalized sweep is still incomplete.
+- The compute-normalized sweep is complete, but still only one pilot sweep.
 
 ## Next Checks
 
-1. Finish the 300-second fixed-time sweep.
-2. Plot validation loss vs `top_k` for fixed GPU time.
-3. Repeat only the most informative rows: dense, csa-k1, best CSA.
-4. If CSA does not improve with `top_k`, inspect the selector and compressor.
-5. If CSA improves smoothly, increase training budget before changing any other knob.
+1. Plot validation loss vs `top_k` for fixed GPU time.
+2. Inspect the selector and compressor, because `top_k` did not help here.
+3. Repeat only the most informative rows: dense, csa-k1, csa-k8, csa-k16.
+4. Try a longer CSA-only run to see whether compressed summaries need more time.
+5. Do not change multiple CSA knobs until this top_k result is understood.
 
 ## Provisional Claim
 
@@ -240,8 +255,9 @@ The safe claim today is:
 
 ```text
 In a small plain-PyTorch CSA implementation, fixed-token results are not enough.
-The meaningful question is whether larger top_k recovers quality under equal
-GPU time.
+Under equal GPU time, increasing top_k from 1 to 16 did not recover quality in
+this pilot.
 ```
 
-That is exactly what the current 300-second sweep is measuring.
+The next research step is diagnostic, not bigger hype: find out whether the
+selector/compressor is learning useful compressed summaries.
