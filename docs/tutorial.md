@@ -8,6 +8,10 @@ context, how Compressed Sparse Attention (CSA) changes the scaling, where CSA fi
 inside this repository, and how to change one variable and measure whether your
 change helped.
 
+You will learn how DeepSeek makes LLM 10x faster.
+
+We will understand DeepSeek’s Compressed Sparse Attention, then implement it from paper, and lastly do our own new research. After watching this you will have full understanding be able to continue producing cutting edge research on CSA.
+
 ## Can GitHub Render This?
 
 Yes, but with one important distinction.
@@ -28,123 +32,50 @@ So the practical rule is:
 
 ---
 
-## Before Level 1: What Is A Token?
+## Level 0: Quick Token Reminder
 
-Before CSA makes sense, one beginner idea has to click:
+An LLM does not see a paragraph as one big object. It first splits text into
+tokens, then turns those tokens into vectors.
 
-> A language model does not read text as sentences, words, or letters. It reads
-> text as **tokens**.
+For example, this sentence:
 
-A token is a small chunk produced by the model's tokenizer. Sometimes it is a
-whole word. Sometimes it is part of a word. Sometimes it is punctuation.
+```text
+Coffee and news early.
+```
 
-For example:
+might become tokens like:
 
-| Text | Possible tokens |
-| --- | --- |
-| `Coffee and news early.` | `Coffee` `and` `news` `early` `.` |
-| `refrigerator` | `refrig` `erator` |
-| `I'm coding.` | `I` `'m` `coding` `.` |
-| `GPU-optimized` | `GPU` `-` `optimized` |
+```text
+[Coffee] [and] [news] [early] [.]
+```
 
-Different tokenizers split text differently, so the exact pieces can change.
-The important idea is stable:
+Real tokenizers differ. A token can be a word, part of a word, punctuation, or
+even whitespace. The exact split is not the point here. The point is:
 
 ```text
 text -> tokens -> vectors -> attention
 ```
 
-Each token becomes a vector, which is just a list of numbers the model can do
-math on. Attention does not compare raw words. It compares these token vectors.
+Attention is how the current token takes information from previous tokens. If
+the model is predicting what comes next, it can look back and ask: which earlier
+tokens matter right now?
 
-### A Tiny Token Story
+CSA changes that lookup. Instead of making the current token inspect every old
+token directly, it compresses older tokens into summary blocks, then attends to
+the most relevant summaries plus a small window of recent raw tokens.
 
-Suppose the model reads this short day log:
-
-```text
-Coffee and news early. Gym for an hour.
-Code all afternoon long. Called mom this evening.
-```
-
-For teaching, imagine it becomes 16 tokens:
-
-| Block | Tokens |
-| --- | --- |
-| Block 1 | `Coffee` `and` `news` `early.` |
-| Block 2 | `Gym` `for` `an` `hour.` |
-| Block 3 | `Code` `all` `afternoon` `long.` |
-| Block 4 | `Called` `mom` `this` `evening.` |
-
-With normal attention, the model stores one key and one value for every token.
-That means 16 token positions create 16 key/value entries. A future query has
-to compare against all of them.
-
-Small example:
+Tiny picture:
 
 ```text
-16 tokens -> 16 KV entries
+[Coffee] [and] [news] [early]   [Gym] [for] [an] [hour]
+            |                                |
+            v                                v
+     [morning summary]              [workout summary]
 ```
 
-Long-context reality:
-
-```text
-1,000,000 tokens -> 1,000,000 KV entries
-```
-
-That is the wall CSA is trying to avoid.
-
-### How CSA Compresses Tokens
-
-Compressed Sparse Attention groups old tokens into blocks. If the block size is
-`m = 4`, the 16-token example becomes four blocks:
-
-```text
-[Coffee and news early.] [Gym for an hour.]
-[Code all afternoon long.] [Called mom this evening.]
-```
-
-Then the compressor turns each block into one summary vector:
-
-| Raw token block | Human shorthand for the compressed vector |
-| --- | --- |
-| `Coffee` `and` `news` `early.` | `morning: coffee + news` |
-| `Gym` `for` `an` `hour.` | `midday: workout` |
-| `Code` `all` `afternoon` `long.` | `afternoon: coding` |
-| `Called` `mom` `this` `evening.` | `evening: family call` |
-
-Those labels are only for us. Inside the model, the summaries are still vectors,
-not English phrases. The important shape is:
-
-```text
-16 token vectors
-        |
-        | compress every m = 4 tokens
-        v
-4 summary vectors
-```
-
-So every old token still contributes to the context, but it contributes through
-a smaller number of learned summaries.
-
-CSA then asks a cheaper question:
-
-```text
-Which summary blocks matter for this query?
-```
-
-Instead of forcing every query to inspect every old token, CSA selects a few
-relevant summaries with `top_k`. It also keeps a recent sliding window of raw
-tokens, because the newest text often needs exact detail.
-
-That is the beginner mental model:
-
-```text
-old history       -> compressed summaries
-recent history    -> raw tokens
-current query     -> picks useful summaries + reads recent raw tokens
-```
-
-The rest of the tutorial turns that idea into code.
+Those summary labels are just human shorthand. Inside the model, each summary is
+still a vector. CSA is asking: can we keep enough information while making the
+model look at fewer things?
 
 ---
 
@@ -154,14 +85,19 @@ The rest of the tutorial turns that idea into code.
 
 Vanilla self-attention has a brutally simple contract:
 
-1. Store one key and one value for every token.
-2. For each query token, compare it against every previous key.
-3. Use the resulting weights to mix the values.
+1. Take the current token.
+2. Compare it against the previous tokens.
+3. Pull information from the previous tokens that seem most useful.
+
+Implementation detail: transformers store previous-token information as keys
+and values, often abbreviated as `KV`. A key is what the current token compares
+against. A value is the information that gets mixed into the output after the
+comparison decides what matters.
 
 That is elegant, but it scales badly.
 
-Memory grows linearly because every token adds another KV entry. Compute grows
-quadratically because every query touches every key.
+Memory grows linearly because every token adds another stored key/value entry.
+Compute grows quadratically because every query touches every previous key.
 
 At short context lengths, this is fine. At one million tokens, it becomes the
 main bottleneck.
