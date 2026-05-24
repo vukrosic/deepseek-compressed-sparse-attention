@@ -5,6 +5,8 @@ evidence, not a final claim.
 
 <!-- Note: [2026-05-24 14:17] test note at line 5 -->
 
+Companion critique: [Critique Of The CSA top_k Mini Paper](csa_top_k_tradeoff_critique.md).
+
 ## Abstract
 
 Compressed Sparse Attention (CSA) lets each token attend to a local window plus
