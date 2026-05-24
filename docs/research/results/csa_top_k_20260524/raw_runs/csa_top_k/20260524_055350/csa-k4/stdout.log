@@ -1,0 +1,72 @@
+Failed to load /root/deepseek-compressed-sparse-attention/.venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so: Could not load this library: /root/deepseek-compressed-sparse-attention/.venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so
+Failed to load /root/deepseek-compressed-sparse-attention/.venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so: Could not load this library: /root/deepseek-compressed-sparse-attention/.venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so
+2026-05-24 05:55:26 | INFO     | root | Logging to file: logs/training_20260524_055526.log
+2026-05-24 05:55:26 | INFO     | root | Starting training
+Device: CUDA
+GPU: NVIDIA GeForce RTX 3090 (25.3 GB)
+PyTorch: 2.11.0+cu128
+
+🌱 Set all seeds to 42 (benchmark mode, data seeding only)
+Random seed: 42
+Loading config from configs.research_configs.CSAMinimumPaperConfig
+Dynamic Data Calculation:
+  Batch: 4, Seq: 2048, Accumulation: 1
+  Target tokens: 200,000
+  Est. docs needed (factor 2.0): 400
+Loading dataset with Hugging Face Datasets API...
+2026-05-24 05:55:28 | INFO     | data.loader | Loading tokenizer: HuggingFaceTB/SmolLM2-135M
+2026-05-24 05:55:28 | INFO     | httpx | HTTP Request: HEAD https://huggingface.co/HuggingFaceTB/SmolLM2-135M/resolve/main/config.json "HTTP/1.1 307 Temporary Redirect"
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+2026-05-24 05:55:28 | WARNING  | huggingface_hub.utils._http | Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+2026-05-24 05:55:28 | INFO     | httpx | HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/HuggingFaceTB/SmolLM2-135M/93efa2f097d58c2a74874c7e644dbc9b0cee75a2/config.json "HTTP/1.1 200 OK"
+2026-05-24 05:55:28 | INFO     | httpx | HTTP Request: HEAD https://huggingface.co/HuggingFaceTB/SmolLM2-135M/resolve/main/tokenizer_config.json "HTTP/1.1 307 Temporary Redirect"
+2026-05-24 05:55:28 | INFO     | httpx | HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/HuggingFaceTB/SmolLM2-135M/93efa2f097d58c2a74874c7e644dbc9b0cee75a2/tokenizer_config.json "HTTP/1.1 200 OK"
+2026-05-24 05:55:28 | INFO     | httpx | HTTP Request: GET https://huggingface.co/api/models/HuggingFaceTB/SmolLM2-135M/tree/main/additional_chat_templates?recursive=false&expand=false "HTTP/1.1 404 Not Found"
+2026-05-24 05:55:28 | INFO     | httpx | HTTP Request: GET https://huggingface.co/api/models/HuggingFaceTB/SmolLM2-135M/tree/main?recursive=true&expand=false "HTTP/1.1 200 OK"
+2026-05-24 05:55:28 | INFO     | data.loader | Set pad_token to eos_token: <|endoftext|>
+Loading pre-processed dataset from processed_data/speedrun_40M...
+Loaded single dataset. Splitting into train/val...
+2026-05-24 05:55:28 | INFO     | root | Train sequences: 18,000, Val sequences: 2,000
+
+Model configuration
+----------------------------------------------------------------------
+d_model: 256, layers: 8, heads: 8
+ff dim: 1024
+attention: csa
+csa: m=16, top_k=4, window=64, indexer_heads=4, groups=1
+train tokens: 200,000
+max train seconds: 900.0
+batch size: 4
+vocab size: 49152
+
+2026-05-24 05:55:28 | INFO     | root | Model configuration: {'d_model': 256, 'n_heads': 8, 'n_layers': 8, 'd_ff': 1024, 'n_kv_heads': 4, 'attention_impl': 'csa', 'csa': CSAConfig(compression_block_size=16, top_k=4, sliding_window_size=64, indexer_heads=4, query_compression_dim=None, indexer_dim=None, output_groups=1, group_hidden_dim=None), 'max_seq_len': 2048, 'vocab_size': 49152, 'compile_model': False, 'batch_size': 4, 'gradient_accumulation_steps': 1, 'train_tokens': 200000, 'muon_lr': 0.024, 'muon_momentum': 0.95, 'adamw_lr': 0.006, 'warmup_ratio': 0.0, 'schedule_type': 'constant', 'eval_every': None, 'eval_steps': 100, 'eval_milestones': (0, 50, 100, 150, 200, 300, 400), 'weight_decay': 0.2, 'dropout': 0.0, 'grad_clip': 1.0, 'use_amp': True, 'log_milestones': (100, 500, 1000), 'd_k': 32, 'seed': 42, 'log_every': 50, 'max_train_seconds': 900.0}
+
+🚀 Training dense model
+🌱 Set all seeds to 42 (benchmark mode, data seeding only)
+  📊 Total parameters: 18,772,224
+  Muon parameters: 6,184,960
+  AdamW parameters: 12,587,264
+🌱 Set all seeds to 42 (benchmark mode, data seeding only)
+⚙️ Setup & Compilation complete in 0.82s
+----------------------------------------------------------------------
+Training:   0%|          | 0/200000 [00:00<?, ?tokens/s]Training:   0%|          | 0/200000 [00:03<?, ?tokens/s, step=0/24, loss=10.8358, acc=0.003, lr=0.02400] [Step 0] Loss: 10.8358 | Acc: 0.003 | LR: 0.024000
+Training:   4%|▍         | 8192/200000 [00:03<01:15, 2526.22tokens/s, step=0/24, loss=10.8358, acc=0.003, lr=0.02400]
+Step 0: Val Loss: 10.8223, Val Acc: 0.0084, Val PPL: 50128.75, LR: 0.02400
+Training:   8%|▊         | 16384/200000 [00:07<01:29, 2047.17tokens/s, step=0/24, loss=10.8358, acc=0.003, lr=0.02400]Training:  12%|█▏        | 24576/200000 [00:07<00:48, 3637.07tokens/s, step=0/24, loss=10.8358, acc=0.003, lr=0.02400]Training:  16%|█▋        | 32768/200000 [00:08<00:29, 5732.14tokens/s, step=0/24, loss=10.8358, acc=0.003, lr=0.02400]Training:  20%|██        | 40960/200000 [00:08<00:18, 8399.76tokens/s, step=0/24, loss=10.8358, acc=0.003, lr=0.02400]Training:  25%|██▍       | 49152/200000 [00:08<00:12, 11672.16tokens/s, step=0/24, loss=10.8358, acc=0.003, lr=0.02400]Training:  29%|██▊       | 57344/200000 [00:08<00:09, 15498.59tokens/s, step=0/24, loss=10.8358, acc=0.003, lr=0.02400]Training:  33%|███▎      | 65536/200000 [00:08<00:06, 19745.74tokens/s, step=0/24, loss=10.8358, acc=0.003, lr=0.02400]Training:  37%|███▋      | 73728/200000 [00:08<00:05, 24266.25tokens/s, step=0/24, loss=10.8358, acc=0.003, lr=0.02400]Training:  41%|████      | 81920/200000 [00:09<00:04, 28758.73tokens/s, step=0/24, loss=10.8358, acc=0.003, lr=0.02400]Training:  45%|████▌     | 90112/200000 [00:09<00:03, 32960.51tokens/s, step=0/24, loss=10.8358, acc=0.003, lr=0.02400]Training:  49%|████▉     | 98304/200000 [00:09<00:02, 36648.43tokens/s, step=0/24, loss=10.8358, acc=0.003, lr=0.02400]Training:  53%|█████▎    | 106496/200000 [00:09<00:02, 39500.29tokens/s, step=0/24, loss=10.8358, acc=0.003, lr=0.02400]Training:  57%|█████▋    | 114688/200000 [00:09<00:02, 42006.03tokens/s, step=0/24, loss=10.8358, acc=0.003, lr=0.02400]Training:  61%|██████▏   | 122880/200000 [00:09<00:01, 43792.46tokens/s, step=0/24, loss=10.8358, acc=0.003, lr=0.02400]Training:  66%|██████▌   | 131072/200000 [00:10<00:01, 44565.70tokens/s, step=0/24, loss=10.8358, acc=0.003, lr=0.02400]Training:  70%|██████▉   | 139264/200000 [00:10<00:01, 45513.50tokens/s, step=0/24, loss=10.8358, acc=0.003, lr=0.02400]Training:  74%|███████▎  | 147456/200000 [00:10<00:01, 46481.39tokens/s, step=0/24, loss=10.8358, acc=0.003, lr=0.02400]Training:  78%|███████▊  | 155648/200000 [00:10<00:00, 47031.61tokens/s, step=0/24, loss=10.8358, acc=0.003, lr=0.02400]Training:  82%|████████▏ | 163840/200000 [00:10<00:00, 47536.91tokens/s, step=0/24, loss=10.8358, acc=0.003, lr=0.02400]Training:  86%|████████▌ | 172032/200000 [00:10<00:00, 47690.18tokens/s, step=0/24, loss=10.8358, acc=0.003, lr=0.02400]Training:  90%|█████████ | 180224/200000 [00:11<00:00, 47776.90tokens/s, step=0/24, loss=10.8358, acc=0.003, lr=0.02400]Training:  94%|█████████▍| 188416/200000 [00:11<00:00, 48273.65tokens/s, step=0/24, loss=10.8358, acc=0.003, lr=0.02400]Training:  98%|█████████▊| 196608/200000 [00:11<00:00, 48215.28tokens/s, step=0/24, loss=10.8358, acc=0.003, lr=0.02400]Training: 204800tokens [00:11, 48162.77tokens/s, step=0/24, loss=10.8358, acc=0.003, lr=0.02400]                        Training: 204800tokens [00:11, 17545.98tokens/s, step=0/24, loss=10.8358, acc=0.003, lr=0.02400]
+   📊 Metrics saved to plots/metrics_200000_20260524_055545.json
+   📈 Plot saved to plots/val_loss_200000_20260524_055545.png
+
+======================================================================
+ TRAINING RESULTS
+======================================================================
+Warmup & Setup:                  0s 822ms
+Active Training Time:            15s 981ms
+Total Tokens:                    204,800
+Tokens/sec:                      12814.46
+Peak CUDA allocated:             6.87 GiB
+Peak CUDA reserved:              7.66 GiB
+----------------------------------------------------------------------
+Final Train Loss:                7.0288
+Final Val Loss:                  6.9850
+Final Val Accuracy:              0.1285
+======================================================================

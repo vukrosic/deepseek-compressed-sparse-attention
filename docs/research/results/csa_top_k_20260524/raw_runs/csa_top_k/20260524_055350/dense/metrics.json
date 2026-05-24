@@ -1,0 +1,104 @@
+{
+  "final_metrics": {
+    "val_loss": 7.004790744781494,
+    "val_accuracy": 0.1272532975085491,
+    "val_perplexity": 1101.8994526729218,
+    "train_loss": 7.153504848480225
+  },
+  "setup_time_seconds": 0.7610411643981934,
+  "active_training_time_seconds": 9.737170696258545,
+  "total_wall_time_seconds": 10.498211860656738,
+  "total_time_minutes": 0.1749701976776123,
+  "actual_steps": 25,
+  "tokens_seen": 204800,
+  "tokens_per_second": 21032.803715631,
+  "max_train_seconds": 900.0,
+  "stop_reason": null,
+  "peak_cuda_memory_allocated_bytes": 6640953344,
+  "peak_cuda_memory_reserved_bytes": 7453278208,
+  "train_tokens": 200000,
+  "experiment_metadata": {
+    "git_commit": "b2a40c1a683097f876ba608bebe9e86bb04d8947",
+    "seed": 42,
+    "attention_impl": "dense",
+    "train_tokens_target": 200000,
+    "max_train_seconds": 900.0,
+    "max_seq_len": 2048,
+    "d_model": 256,
+    "n_heads": 8,
+    "n_layers": 8,
+    "d_ff": 1024,
+    "batch_size": 4,
+    "gradient_accumulation_steps": 1,
+    "csa_top_k": null,
+    "csa_compression_block_size": null,
+    "csa_sliding_window_size": null,
+    "csa_indexer_heads": null,
+    "attention_vector_budget": 1024.0,
+    "attention_vector_budget_max": 2048,
+    "raw_token_equivalent_coverage": 2048,
+    "dense_avg_causal_budget": 1024.0,
+    "platform": "Linux-5.4.0-216-generic-x86_64-with-glibc2.39",
+    "python_version": "3.12.3",
+    "torch_version": "2.11.0+cu128",
+    "cuda_available": true,
+    "cuda_version": "12.8",
+    "gpu_name": "NVIDIA GeForce RTX 3090",
+    "gpu_memory_total_bytes": 25307578368
+  },
+  "experiment_config": {
+    "git_commit": "b2a40c1a683097f876ba608bebe9e86bb04d8947",
+    "seed": 42,
+    "attention_impl": "dense",
+    "train_tokens_target": 200000,
+    "max_train_seconds": 900.0,
+    "max_seq_len": 2048,
+    "d_model": 256,
+    "n_heads": 8,
+    "n_layers": 8,
+    "d_ff": 1024,
+    "batch_size": 4,
+    "gradient_accumulation_steps": 1,
+    "csa_top_k": null,
+    "csa_compression_block_size": null,
+    "csa_sliding_window_size": null,
+    "csa_indexer_heads": null,
+    "attention_vector_budget": 1024.0,
+    "attention_vector_budget_max": 2048,
+    "raw_token_equivalent_coverage": 2048,
+    "dense_avg_causal_budget": 1024.0,
+    "platform": "Linux-5.4.0-216-generic-x86_64-with-glibc2.39",
+    "python_version": "3.12.3",
+    "torch_version": "2.11.0+cu128",
+    "cuda_available": true,
+    "cuda_version": "12.8",
+    "gpu_name": "NVIDIA GeForce RTX 3090",
+    "gpu_memory_total_bytes": 25307578368
+  },
+  "history": {
+    "steps": [
+      0,
+      25
+    ],
+    "val_losses": [
+      10.817173919677735,
+      7.004790744781494
+    ],
+    "val_accuracies": [
+      0.008422081094284318,
+      0.1272532975085491
+    ],
+    "val_perplexities": [
+      49869.95118415436,
+      1101.8994526729218
+    ],
+    "elapsed_times": [
+      0.09345510005950927,
+      0.16228376229604086
+    ],
+    "learning_rates": [
+      0.024,
+      0.024
+    ]
+  }
+}

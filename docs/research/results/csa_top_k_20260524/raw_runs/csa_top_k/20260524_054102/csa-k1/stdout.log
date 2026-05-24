@@ -1,0 +1,60 @@
+Failed to load /root/deepseek-compressed-sparse-attention/.venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so: Could not load this library: /root/deepseek-compressed-sparse-attention/.venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so
+Failed to load /root/deepseek-compressed-sparse-attention/.venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so: Could not load this library: /root/deepseek-compressed-sparse-attention/.venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so
+2026-05-24 05:41:26 | INFO     | root | Logging to file: logs/training_20260524_054126.log
+2026-05-24 05:41:26 | INFO     | root | Starting training
+Device: CUDA
+GPU: NVIDIA GeForce RTX 3090 (25.3 GB)
+PyTorch: 2.11.0+cu128
+
+🌱 Set all seeds to 42 (benchmark mode, data seeding only)
+Random seed: 42
+Loading config from configs.research_configs.CSAMacSmokeConfig
+Dynamic Data Calculation:
+  Batch: 4, Seq: 128, Accumulation: 1
+  Target tokens: 8,192
+  Est. docs needed (factor 2.0): 100
+Loading deterministic synthetic dataset for local smoke run...
+2026-05-24 05:41:27 | INFO     | root | Train sequences: 256, Val sequences: 64
+
+Model configuration
+----------------------------------------------------------------------
+d_model: 128, layers: 2, heads: 4
+ff dim: 512
+attention: csa
+csa: m=16, top_k=1, window=64, indexer_heads=4, groups=1
+train tokens: 8,192
+max train seconds: 120.0
+batch size: 4
+vocab size: 1024
+
+2026-05-24 05:41:27 | INFO     | root | Model configuration: {'d_model': 128, 'n_heads': 4, 'n_layers': 2, 'd_ff': 512, 'n_kv_heads': 4, 'attention_impl': 'csa', 'csa': CSAConfig(compression_block_size=16, top_k=1, sliding_window_size=64, indexer_heads=4, query_compression_dim=32, indexer_dim=16, output_groups=1, group_hidden_dim=None), 'max_seq_len': 128, 'vocab_size': 1024, 'compile_model': False, 'batch_size': 4, 'gradient_accumulation_steps': 1, 'train_tokens': 8192, 'muon_lr': 0.006, 'muon_momentum': 0.95, 'adamw_lr': 0.0015, 'warmup_ratio': 0.0, 'schedule_type': 'constant', 'eval_every': None, 'eval_steps': 100, 'eval_milestones': (0, 50, 100, 150, 200, 300, 400), 'weight_decay': 0.01, 'dropout': 0.0, 'grad_clip': 1.0, 'use_amp': False, 'log_milestones': (100, 500, 1000), 'd_k': 32, 'seed': 42, 'log_every': 50, 'max_train_seconds': 120.0}
+
+🚀 Training dense model
+🌱 Set all seeds to 42 (benchmark mode, data seeding only)
+  📊 Total parameters: 541,312
+  Muon parameters: 409,600
+  AdamW parameters: 131,712
+🌱 Set all seeds to 42 (benchmark mode, data seeding only)
+⚙️ Setup & Compilation complete in 0.25s
+----------------------------------------------------------------------
+Training:   0%|          | 0/8192 [00:00<?, ?tokens/s]Training:   0%|          | 0/8192 [00:08<?, ?tokens/s, step=0/16, loss=6.9688, acc=0.000, lr=0.00600] [Step 0] Loss: 6.9688 | Acc: 0.000 | LR: 0.006000
+Training:   6%|▋         | 512/8192 [00:08<02:01, 63.10tokens/s, step=0/16, loss=6.9688, acc=0.000, lr=0.00600]
+Step 0: Val Loss: 6.9668, Val Acc: 0.0010, Val PPL: 1060.82, LR: 0.00600
+Training:  12%|█▎        | 1024/8192 [00:08<00:48, 146.54tokens/s, step=0/16, loss=6.9688, acc=0.000, lr=0.00600]Training:  25%|██▌       | 2048/8192 [00:08<00:16, 383.03tokens/s, step=0/16, loss=6.9688, acc=0.000, lr=0.00600]Training:  38%|███▊      | 3072/8192 [00:08<00:07, 702.03tokens/s, step=0/16, loss=6.9688, acc=0.000, lr=0.00600]Training:  50%|█████     | 4096/8192 [00:08<00:03, 1120.52tokens/s, step=0/16, loss=6.9688, acc=0.000, lr=0.00600]Training:  62%|██████▎   | 5120/8192 [00:08<00:01, 1656.29tokens/s, step=0/16, loss=6.9688, acc=0.000, lr=0.00600]Training:  75%|███████▌  | 6144/8192 [00:08<00:00, 2319.63tokens/s, step=0/16, loss=6.9688, acc=0.000, lr=0.00600]Training:  88%|████████▊ | 7168/8192 [00:08<00:00, 3103.53tokens/s, step=0/16, loss=6.9688, acc=0.000, lr=0.00600]Training: 100%|██████████| 8192/8192 [00:09<00:00, 3907.91tokens/s, step=0/16, loss=6.9688, acc=0.000, lr=0.00600]Training: 100%|██████████| 8192/8192 [00:09<00:00, 897.64tokens/s, step=0/16, loss=6.9688, acc=0.000, lr=0.00600]
+   📊 Metrics saved to plots/metrics_8192_20260524_054137.json
+   📈 Plot saved to plots/val_loss_8192_20260524_054137.png
+
+======================================================================
+ TRAINING RESULTS
+======================================================================
+Warmup & Setup:                  0s 250ms
+Active Training Time:            9s 327ms
+Total Tokens:                    8,192
+Tokens/sec:                      878.22
+Peak CUDA allocated:             0.03 GiB
+Peak CUDA reserved:              0.05 GiB
+----------------------------------------------------------------------
+Final Train Loss:                6.9688
+Final Val Loss:                  6.9648
+Final Val Accuracy:              0.0010
+======================================================================

@@ -7,6 +7,8 @@ evidence, not a final claim.
 
 Companion critique: [Critique Of The CSA top_k Mini Paper](csa_top_k_tradeoff_critique.md).
 
+Archived results bundle: [CSA top_k Results Bundle](results/csa_top_k_20260524/README.md).
+
 ## Abstract
 
 Compressed Sparse Attention (CSA) lets each token attend to a local window plus

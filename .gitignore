@@ -243,6 +243,10 @@ logs_debug/
 runs/
 plots/metrics_*.json
 plots/val_loss_*.png
+
+# Curated research artifacts that should stay reviewable in Git.
+!docs/research/results/**/*.json
+!docs/research/results/**/*.log
 !docs/timecapsule/**/*
 
 # gemini-cli settings

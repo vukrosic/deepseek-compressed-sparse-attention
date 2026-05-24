@@ -1,0 +1,72 @@
+Failed to load /root/deepseek-compressed-sparse-attention/.venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so: Could not load this library: /root/deepseek-compressed-sparse-attention/.venv/lib/python3.12/site-packages/torchao/_C_cutlass_90a.abi3.so
+Failed to load /root/deepseek-compressed-sparse-attention/.venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so: Could not load this library: /root/deepseek-compressed-sparse-attention/.venv/lib/python3.12/site-packages/torchao/_C_mxfp8.cpython-310-x86_64-linux-gnu.so
+2026-05-24 05:48:11 | INFO     | root | Logging to file: logs/training_20260524_054811.log
+2026-05-24 05:48:11 | INFO     | root | Starting training
+Device: CUDA
+GPU: NVIDIA GeForce RTX 3090 (25.3 GB)
+PyTorch: 2.11.0+cu128
+
+🌱 Set all seeds to 42 (benchmark mode, data seeding only)
+Random seed: 42
+Loading config from configs.research_configs.CSAMinimumPaperConfig
+Dynamic Data Calculation:
+  Batch: 4, Seq: 2048, Accumulation: 1
+  Target tokens: 50,000
+  Est. docs needed (factor 2.0): 100
+Loading dataset with Hugging Face Datasets API...
+2026-05-24 05:48:13 | INFO     | data.loader | Loading tokenizer: HuggingFaceTB/SmolLM2-135M
+2026-05-24 05:48:13 | INFO     | httpx | HTTP Request: HEAD https://huggingface.co/HuggingFaceTB/SmolLM2-135M/resolve/main/config.json "HTTP/1.1 307 Temporary Redirect"
+2026-05-24 05:48:13 | INFO     | httpx | HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/HuggingFaceTB/SmolLM2-135M/93efa2f097d58c2a74874c7e644dbc9b0cee75a2/config.json "HTTP/1.1 200 OK"
+2026-05-24 05:48:13 | INFO     | httpx | HTTP Request: HEAD https://huggingface.co/HuggingFaceTB/SmolLM2-135M/resolve/main/tokenizer_config.json "HTTP/1.1 307 Temporary Redirect"
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+2026-05-24 05:48:13 | WARNING  | huggingface_hub.utils._http | Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+2026-05-24 05:48:13 | INFO     | httpx | HTTP Request: HEAD https://huggingface.co/api/resolve-cache/models/HuggingFaceTB/SmolLM2-135M/93efa2f097d58c2a74874c7e644dbc9b0cee75a2/tokenizer_config.json "HTTP/1.1 200 OK"
+2026-05-24 05:48:13 | INFO     | httpx | HTTP Request: GET https://huggingface.co/api/models/HuggingFaceTB/SmolLM2-135M/tree/main/additional_chat_templates?recursive=false&expand=false "HTTP/1.1 404 Not Found"
+2026-05-24 05:48:13 | INFO     | httpx | HTTP Request: GET https://huggingface.co/api/models/HuggingFaceTB/SmolLM2-135M/tree/main?recursive=true&expand=false "HTTP/1.1 200 OK"
+2026-05-24 05:48:13 | INFO     | data.loader | Set pad_token to eos_token: <|endoftext|>
+Loading pre-processed dataset from processed_data/speedrun_40M...
+Loaded single dataset. Splitting into train/val...
+2026-05-24 05:48:13 | INFO     | root | Train sequences: 18,000, Val sequences: 2,000
+
+Model configuration
+----------------------------------------------------------------------
+d_model: 256, layers: 8, heads: 8
+ff dim: 1024
+attention: csa
+csa: m=16, top_k=8, window=64, indexer_heads=4, groups=1
+train tokens: 50,000
+max train seconds: 300.0
+batch size: 4
+vocab size: 49152
+
+2026-05-24 05:48:13 | INFO     | root | Model configuration: {'d_model': 256, 'n_heads': 8, 'n_layers': 8, 'd_ff': 1024, 'n_kv_heads': 4, 'attention_impl': 'csa', 'csa': CSAConfig(compression_block_size=16, top_k=8, sliding_window_size=64, indexer_heads=4, query_compression_dim=None, indexer_dim=None, output_groups=1, group_hidden_dim=None), 'max_seq_len': 2048, 'vocab_size': 49152, 'compile_model': False, 'batch_size': 4, 'gradient_accumulation_steps': 1, 'train_tokens': 50000, 'muon_lr': 0.024, 'muon_momentum': 0.95, 'adamw_lr': 0.006, 'warmup_ratio': 0.0, 'schedule_type': 'constant', 'eval_every': None, 'eval_steps': 100, 'eval_milestones': (0, 50, 100, 150, 200, 300, 400), 'weight_decay': 0.2, 'dropout': 0.0, 'grad_clip': 1.0, 'use_amp': True, 'log_milestones': (100, 500, 1000), 'd_k': 32, 'seed': 42, 'log_every': 50, 'max_train_seconds': 300.0}
+
+🚀 Training dense model
+🌱 Set all seeds to 42 (benchmark mode, data seeding only)
+  📊 Total parameters: 18,772,224
+  Muon parameters: 6,184,960
+  AdamW parameters: 12,587,264
+🌱 Set all seeds to 42 (benchmark mode, data seeding only)
+⚙️ Setup & Compilation complete in 0.73s
+----------------------------------------------------------------------
+Training:   0%|          | 0/50000 [00:00<?, ?tokens/s]Training:   0%|          | 0/50000 [00:03<?, ?tokens/s, step=0/6, loss=10.8357, acc=0.003, lr=0.02400] [Step 0] Loss: 10.8357 | Acc: 0.003 | LR: 0.024000
+Training:  16%|█▋        | 8192/50000 [00:03<00:16, 2611.41tokens/s, step=0/6, loss=10.8357, acc=0.003, lr=0.02400]
+Step 0: Val Loss: 10.8222, Val Acc: 0.0084, Val PPL: 50123.39, LR: 0.02400
+Training:  33%|███▎      | 16384/50000 [00:07<00:16, 2078.38tokens/s, step=0/6, loss=10.8357, acc=0.003, lr=0.02400]Training:  49%|████▉     | 24576/50000 [00:07<00:06, 3687.30tokens/s, step=0/6, loss=10.8357, acc=0.003, lr=0.02400]Training:  66%|██████▌   | 32768/50000 [00:07<00:02, 5798.18tokens/s, step=0/6, loss=10.8357, acc=0.003, lr=0.02400]Training:  82%|████████▏ | 40960/50000 [00:08<00:01, 8491.62tokens/s, step=0/6, loss=10.8357, acc=0.003, lr=0.02400]Training:  98%|█████████▊| 49152/50000 [00:08<00:00, 11799.48tokens/s, step=0/6, loss=10.8357, acc=0.003, lr=0.02400]Training: 57344tokens [00:08, 15663.48tokens/s, step=0/6, loss=10.8357, acc=0.003, lr=0.02400]                       Training: 57344tokens [00:08, 6745.56tokens/s, step=0/6, loss=10.8357, acc=0.003, lr=0.02400]
+   📊 Metrics saved to plots/metrics_50000_20260524_054826.json
+   📈 Plot saved to plots/val_loss_50000_20260524_054826.png
+
+======================================================================
+ TRAINING RESULTS
+======================================================================
+Warmup & Setup:                  0s 727ms
+Active Training Time:            12s 688ms
+Total Tokens:                    57,344
+Tokens/sec:                      4519.54
+Peak CUDA allocated:             6.91 GiB
+Peak CUDA reserved:              7.71 GiB
+----------------------------------------------------------------------
+Final Train Loss:                8.1900
+Final Val Loss:                  7.9223
+Final Val Accuracy:              0.0884
+======================================================================

@@ -1,0 +1,16 @@
+host=c80e8b8e1bf6
+captured_utc=2026-05-24T07:05:20Z
+repo_commit=b2a40c1a683097f876ba608bebe9e86bb04d8947
+repo_status=0 dirty entries
+
+== gpu ==
+NVIDIA GeForce RTX 3090, 24576 MiB, 570.181
+
+== cuda processes ==
+
+== python ==
+python 3.12.3
+torch 2.11.0+cu128
+cuda 12.8
+cuda_available True
+gpu NVIDIA GeForce RTX 3090
