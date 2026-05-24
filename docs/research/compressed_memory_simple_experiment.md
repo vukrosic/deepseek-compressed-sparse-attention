@@ -176,8 +176,26 @@ Each run writes:
 runs/attention_memory/<timestamp>/manifest.jsonl
 runs/attention_memory/<timestamp>/summary.csv
 runs/attention_memory/<timestamp>/summary.json
+runs/attention_memory/<timestamp>/summary_table.md
+runs/attention_memory/<timestamp>/val_loss_by_attention.png
+runs/attention_memory/<timestamp>/tokens_per_second_by_attention.png
 runs/attention_memory/<timestamp>/<condition>-seed<seed>/metrics.json
 runs/attention_memory/<timestamp>/<condition>-seed<seed>/stdout.log
 ```
 
-Use `summary.csv` for the paper table.
+Use:
+
+```text
+summary_table.md                  paper-ready table
+val_loss_by_attention.png          main result chart
+tokens_per_second_by_attention.png speed sanity-check chart
+summary.csv                        spreadsheet / later analysis
+```
+
+The main paper table should look like this:
+
+| Condition | Runs | Val loss mean | Val loss std | Tok/s mean | Tokens seen mean | Peak alloc GiB | Attention vectors | Coverage |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| dense | 3 | result | result | result | result | result | result | result |
+| local | 3 | result | result | result | result | result | result | result |
+| csa | 3 | result | result | result | result | result | result | result |

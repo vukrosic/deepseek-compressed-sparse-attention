@@ -14,6 +14,8 @@ CONDITIONS = [
     ("csa", "csa", 4),
 ]
 
+CONDITION_ORDER = ["dense", "local", "csa"]
+
 
 SUMMARY_FIELDS = [
     "condition",
@@ -34,6 +36,18 @@ SUMMARY_FIELDS = [
     "raw_token_equivalent_coverage",
     "metrics_path",
     "stdout_path",
+]
+
+AGGREGATE_FIELDS = [
+    "condition",
+    "runs",
+    "val_loss_mean",
+    "val_loss_std",
+    "tokens_per_second_mean",
+    "tokens_seen_mean",
+    "peak_cuda_memory_allocated_gib_mean",
+    "attention_vector_budget",
+    "raw_token_equivalent_coverage",
 ]
 
 
@@ -137,6 +151,133 @@ def flatten_record(record: dict, metrics: dict) -> dict:
     return row
 
 
+def condition_sort_key(condition: str) -> int:
+    try:
+        return CONDITION_ORDER.index(condition)
+    except ValueError:
+        return len(CONDITION_ORDER)
+
+
+def numeric_values(rows: list[dict], key: str) -> list[float]:
+    values = []
+    for row in rows:
+        value = row.get(key)
+        if value is not None and value != "":
+            values.append(float(value))
+    return values
+
+
+def format_cell(value: object, digits: int = 4) -> str:
+    if value is None:
+        return "-"
+    if isinstance(value, float):
+        return f"{value:.{digits}f}"
+    return str(value)
+
+
+def build_aggregate(rows: list[dict]) -> list[dict]:
+    aggregate = []
+    for condition in sorted({row["condition"] for row in rows}, key=condition_sort_key):
+        condition_rows = [
+            row
+            for row in rows
+            if row["condition"] == condition
+            and row["returncode"] == 0
+            and row["val_loss"] is not None
+        ]
+        if not condition_rows:
+            continue
+
+        losses = numeric_values(condition_rows, "val_loss")
+        toks_per_sec = numeric_values(condition_rows, "tokens_per_second")
+        tokens_seen = numeric_values(condition_rows, "tokens_seen")
+        peak_alloc = numeric_values(condition_rows, "peak_cuda_memory_allocated_gib")
+
+        aggregate.append(
+            {
+                "condition": condition,
+                "runs": len(condition_rows),
+                "val_loss_mean": mean(losses),
+                "val_loss_std": stdev(losses) if len(losses) > 1 else 0.0,
+                "tokens_per_second_mean": mean(toks_per_sec) if toks_per_sec else None,
+                "tokens_seen_mean": mean(tokens_seen) if tokens_seen else None,
+                "peak_cuda_memory_allocated_gib_mean": mean(peak_alloc) if peak_alloc else None,
+                "attention_vector_budget": condition_rows[0].get("attention_vector_budget"),
+                "raw_token_equivalent_coverage": condition_rows[0].get("raw_token_equivalent_coverage"),
+            }
+        )
+    return aggregate
+
+
+def write_markdown_table(root: Path, aggregate: list[dict]) -> None:
+    table_path = root / "summary_table.md"
+    lines = [
+        "# Attention Memory Experiment Summary",
+        "",
+        "| Condition | Runs | Val loss mean | Val loss std | Tok/s mean | Tokens seen mean | Peak alloc GiB | Attention vectors | Coverage |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for row in aggregate:
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    str(row["condition"]),
+                    str(row["runs"]),
+                    format_cell(row["val_loss_mean"], 4),
+                    format_cell(row["val_loss_std"], 4),
+                    format_cell(row["tokens_per_second_mean"], 1),
+                    format_cell(row["tokens_seen_mean"], 0),
+                    format_cell(row["peak_cuda_memory_allocated_gib_mean"], 2),
+                    format_cell(row["attention_vector_budget"], 0),
+                    format_cell(row["raw_token_equivalent_coverage"], 0),
+                ]
+            )
+            + " |"
+        )
+    table_path.write_text("\n".join(lines) + "\n")
+
+
+def write_plots(root: Path, aggregate: list[dict]) -> None:
+    if not aggregate:
+        return
+
+    try:
+        import matplotlib.pyplot as plt
+    except Exception as exc:
+        (root / "plot_error.txt").write_text(f"Could not import matplotlib: {exc}\n")
+        return
+
+    labels = [row["condition"] for row in aggregate]
+    colors = ["#2F4858", "#F6AE2D", "#33658A"][: len(labels)]
+
+    val_loss = [row["val_loss_mean"] for row in aggregate]
+    val_loss_err = [row["val_loss_std"] for row in aggregate]
+    fig, ax = plt.subplots(figsize=(7, 4.5))
+    ax.bar(labels, val_loss, yerr=val_loss_err, capsize=5, color=colors)
+    ax.set_title("Validation loss by attention style")
+    ax.set_xlabel("Attention style")
+    ax.set_ylabel("Validation loss, lower is better")
+    ax.grid(axis="y", alpha=0.25)
+    fig.tight_layout()
+    fig.savefig(root / "val_loss_by_attention.png", dpi=180)
+    plt.close(fig)
+
+    tok_rows = [row for row in aggregate if row["tokens_per_second_mean"] is not None]
+    if tok_rows:
+        labels = [row["condition"] for row in tok_rows]
+        tok_per_sec = [row["tokens_per_second_mean"] for row in tok_rows]
+        fig, ax = plt.subplots(figsize=(7, 4.5))
+        ax.bar(labels, tok_per_sec, color=colors[: len(labels)])
+        ax.set_title("Training throughput by attention style")
+        ax.set_xlabel("Attention style")
+        ax.set_ylabel("Tokens per second, higher is better")
+        ax.grid(axis="y", alpha=0.25)
+        fig.tight_layout()
+        fig.savefig(root / "tokens_per_second_by_attention.png", dpi=180)
+        plt.close(fig)
+
+
 def write_summary(root: Path, rows: list[dict]) -> None:
     csv_path = root / "summary.csv"
     with csv_path.open("w", newline="") as f:
@@ -144,28 +285,12 @@ def write_summary(root: Path, rows: list[dict]) -> None:
         writer.writeheader()
         writer.writerows(rows)
 
-    aggregate = []
-    for condition in sorted({row["condition"] for row in rows}):
-        condition_rows = [
-            row for row in rows
-            if row["condition"] == condition and row["returncode"] == 0 and row["val_loss"] is not None
-        ]
-        if not condition_rows:
-            continue
-        losses = [float(row["val_loss"]) for row in condition_rows]
-        toks = [float(row["tokens_per_second"]) for row in condition_rows if row["tokens_per_second"] is not None]
-        aggregate.append(
-            {
-                "condition": condition,
-                "runs": len(condition_rows),
-                "val_loss_mean": mean(losses),
-                "val_loss_std": stdev(losses) if len(losses) > 1 else 0.0,
-                "tokens_per_second_mean": mean(toks) if toks else None,
-            }
-        )
+    aggregate = build_aggregate(rows)
 
     with (root / "summary.json").open("w") as f:
         json.dump({"rows": rows, "aggregate": aggregate}, f, indent=2)
+    write_markdown_table(root, aggregate)
+    write_plots(root, aggregate)
 
 
 def run_one(args, condition: str, attention_impl: str, top_k: int | None, seed: int, root: Path) -> dict:
@@ -254,6 +379,8 @@ def main() -> None:
 
     print(f"Wrote manifest: {manifest_path}")
     print(f"Wrote summary: {root / 'summary.csv'}")
+    print(f"Wrote table: {root / 'summary_table.md'}")
+    print(f"Wrote chart: {root / 'val_loss_by_attention.png'}")
 
 
 if __name__ == "__main__":
