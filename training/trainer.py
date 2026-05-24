@@ -108,11 +108,13 @@ def train_model(
         schedulers = []
 
     current_loss_val = 0.0
+    max_train_seconds = getattr(config, "max_train_seconds", None)
 
     # Training metrics tracking
     # Synchronize CUDA to ensure accurate timing (no queued operations)
     if torch.cuda.is_available():
         torch.cuda.synchronize()
+        torch.cuda.reset_peak_memory_stats()
     train_start_time = time.time()
     metrics_history = {
         'steps': [],
@@ -131,6 +133,7 @@ def train_model(
     pbar = tqdm(total=config.train_tokens, desc=desc, unit="tokens")
     
     stopped_early = False
+    stop_reason = None
 
     while tokens_seen < config.train_tokens:
         for batch_idx, batch in enumerate(train_loader):
@@ -231,6 +234,12 @@ def train_model(
             pbar.update(batch_tokens)
             tokens_seen += batch_tokens
 
+            if max_train_seconds is not None and (time.time() - train_start_time) >= max_train_seconds:
+                current_loss_val = ce_loss.item()
+                stopped_early = True
+                stop_reason = "max_train_seconds"
+                break
+
             if stopped_early:
                 current_loss_val = ce_loss.item()
                 break
@@ -265,6 +274,7 @@ def train_model(
                     if early_stopper(eval_metrics['val_loss'], step):
                         current_loss_val = ce_loss.item()
                         stopped_early = True
+                        stop_reason = "early_stopping"
                         break
 
             step += 1
@@ -280,7 +290,7 @@ def train_model(
     pbar.close()
 
     # Final evaluation (if not stopped early)
-    if not stopped_early or tokens_seen >= config.train_tokens:
+    if not stopped_early or tokens_seen >= config.train_tokens or stop_reason == "max_train_seconds":
         final_eval = evaluate_model(model, val_loader, config)
         final_eval['train_loss'] = current_loss_val
         elapsed_time = (time.time() - train_start_time) / 60
@@ -314,9 +324,12 @@ def train_model(
     if torch.cuda.is_available():
         torch.cuda.synchronize()
     total_time_seconds = time.time() - train_start_time
+    tokens_per_second = tokens_seen / total_time_seconds if total_time_seconds > 0 else 0.0
+    peak_cuda_memory_allocated = torch.cuda.max_memory_allocated() if torch.cuda.is_available() else 0
+    peak_cuda_memory_reserved = torch.cuda.max_memory_reserved() if torch.cuda.is_available() else 0
     
     if stopped_early:
-        print(f"   ⚠️  Training stopped early at step {step}")
+        print(f"   ⚠️  Training stopped early at step {step} ({stop_reason or 'unknown'})")
     
     # Save outputs if directory specified
     if output_dir:
@@ -328,6 +341,13 @@ def train_model(
         metrics_data = {
             'final_metrics': final_eval,
             'total_time_minutes': total_time_seconds / 60,
+            'active_training_time_seconds': total_time_seconds,
+            'tokens_seen': tokens_seen,
+            'tokens_per_second': tokens_per_second,
+            'max_train_seconds': max_train_seconds,
+            'stop_reason': stop_reason,
+            'peak_cuda_memory_allocated_bytes': peak_cuda_memory_allocated,
+            'peak_cuda_memory_reserved_bytes': peak_cuda_memory_reserved,
             'stopped_early': stopped_early,
             'actual_steps': step,
             'history': metrics_history,
@@ -357,6 +377,11 @@ def train_model(
         'training_time': total_time_seconds,
         'steps': step,
         'tokens_seen': tokens_seen,
+        'tokens_per_second': tokens_per_second,
+        'max_train_seconds': max_train_seconds,
+        'stop_reason': stop_reason,
+        'peak_cuda_memory_allocated_bytes': peak_cuda_memory_allocated,
+        'peak_cuda_memory_reserved_bytes': peak_cuda_memory_reserved,
         'train_loss': current_loss_val if 'current_loss_val' in locals() else 0.0,
     }
 
@@ -440,7 +465,8 @@ def train_minimal_llm(
     # ============================================
     # 1. Initialize model with fixed seed
     # ============================================
-    set_seed(42)
+    seed = getattr(config, "seed", 42)
+    set_seed(seed)
     model = MinimalLLM(config)
     model = model.to(device)
     
@@ -531,7 +557,7 @@ def train_minimal_llm(
     # ============================================
     # 8. Reset RNG for reproducible training
     # ============================================
-    set_seed(42)
+    set_seed(seed)
     
     setup_time = time.time() - setup_start
     print(f"⚙️ Setup & Compilation complete in {setup_time:.2f}s")
@@ -565,6 +591,16 @@ def train_minimal_llm(
     metrics_history = results['metrics_history']
     step = results['steps']
     tokens_seen = results['tokens_seen']
+    tokens_per_second = results['tokens_per_second']
+    peak_cuda_memory_allocated = results['peak_cuda_memory_allocated_bytes']
+    peak_cuda_memory_reserved = results['peak_cuda_memory_reserved_bytes']
+    stop_reason = results.get('stop_reason')
+
+    try:
+        from experiments.csa_metrics import build_run_metadata
+        experiment_metadata = build_run_metadata(config)
+    except Exception as exc:
+        experiment_metadata = {"metadata_error": str(exc)}
 
     # ============================================
     # 10. Unified Saving & Reporting
@@ -588,7 +624,13 @@ def train_minimal_llm(
         'total_time_minutes': total_wall_time / 60,
         'actual_steps': step,
         'tokens_seen': tokens_seen,
+        'tokens_per_second': tokens_per_second,
+        'max_train_seconds': getattr(config, 'max_train_seconds', None),
+        'stop_reason': stop_reason,
+        'peak_cuda_memory_allocated_bytes': peak_cuda_memory_allocated,
+        'peak_cuda_memory_reserved_bytes': peak_cuda_memory_reserved,
         'train_tokens': config.train_tokens,
+        'experiment_metadata': experiment_metadata,
         'history': metrics_history,
     }
     with open(metrics_file, 'w') as f:
@@ -654,6 +696,10 @@ def train_minimal_llm(
     print(f"Warmup & Setup:                  {format_time(setup_time)}")
     print(f"Active Training Time:            {format_time(total_training_time)}")
     print(f"Total Tokens:                    {tokens_seen:,}")
+    print(f"Tokens/sec:                      {tokens_per_second:.2f}")
+    if torch.cuda.is_available():
+        print(f"Peak CUDA allocated:             {peak_cuda_memory_allocated / (1024 ** 3):.2f} GiB")
+        print(f"Peak CUDA reserved:              {peak_cuda_memory_reserved / (1024 ** 3):.2f} GiB")
     print("-" * 70)
     print(f"Final Train Loss:                {final_eval.get('train_loss', 0.0):.4f}")
     print(f"Final Val Loss:                  {final_eval['val_loss']:.4f}")
@@ -667,5 +713,8 @@ def train_minimal_llm(
         'setup_time': setup_time,
         'training_time': total_training_time,
         'steps': step,
-        'tokens_seen': tokens_seen
+        'tokens_seen': tokens_seen,
+        'tokens_per_second': tokens_per_second,
+        'peak_cuda_memory_allocated_bytes': peak_cuda_memory_allocated,
+        'peak_cuda_memory_reserved_bytes': peak_cuda_memory_reserved,
     }

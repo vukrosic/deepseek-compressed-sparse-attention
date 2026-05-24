@@ -216,6 +216,7 @@ def main():
     parser.add_argument("--batch_size", type=int, help="Override batch_size")
     parser.add_argument("--gradient_accumulation_steps", type=int, help="Override gradient_accumulation_steps")
     parser.add_argument("--log_every", type=int, default=100, help="Logging frequency in steps")
+    parser.add_argument("--max_train_seconds", type=float, help="Stop after this many active training seconds")
     parser.add_argument("--warmup", type=str, default="true", help="Whether to perform untimed compilation warmup (true/false)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility (default: 42)")
     parser.add_argument("--attention_impl", choices=["dense", "csa"], help="Attention implementation to train")
@@ -233,6 +234,7 @@ def main():
     # Set global seed for reproducibility
     _GLOBAL_SEED = args.seed
     set_seed(args.seed)
+    config_seed = args.seed
     print(f"Random seed: {args.seed}")
 
     # Load Config
@@ -250,6 +252,7 @@ def main():
     else:
         # Default config
         config = LLMConfig()
+    config.seed = config_seed
 
     # Override config with args
     if args.muon_lr is not None:
@@ -270,6 +273,8 @@ def main():
         config.gradient_accumulation_steps = args.gradient_accumulation_steps
     if args.log_every is not None:
         config.log_every = args.log_every
+    if args.max_train_seconds is not None:
+        config.max_train_seconds = args.max_train_seconds
     if args.attention_impl is not None:
         config.attention_impl = args.attention_impl
     if args.csa_compression_block_size is not None:
@@ -394,6 +399,8 @@ def main():
             f"groups={config.csa.output_groups}"
         )
     print(f"train tokens: {config.train_tokens:,}")
+    if getattr(config, "max_train_seconds", None) is not None:
+        print(f"max train seconds: {config.max_train_seconds}")
     print(f"batch size: {config.batch_size}")
     print(f"vocab size: {config.vocab_size}\n")
     logger.info(f"Model configuration: {vars(config)}")
