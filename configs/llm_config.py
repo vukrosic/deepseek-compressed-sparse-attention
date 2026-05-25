@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field
 from typing import Optional, Tuple
 from configs.csa_config import CSAConfig
+from configs.forgetting_config import ForgettingConfig
 
 
 @dataclass
@@ -17,8 +18,10 @@ class LLMConfig:
     # Attention implementation
     # "dense" keeps the original baseline. "local" keeps only a sliding window.
     # "csa" enables local attention plus compressed old memory.
+    # "forgetting" keeps local attention plus gated compressed memory.
     attention_impl: str = "dense"
     csa: CSAConfig = field(default_factory=CSAConfig)
+    forgetting: ForgettingConfig = field(default_factory=ForgettingConfig)
     
     # Data params
     # ⚠️ WARNING: For simplicity, I recomend not changing max_seq_len
@@ -60,5 +63,6 @@ class LLMConfig:
     def __post_init__(self):
         self.d_k = self.d_model // self.n_heads
         assert self.d_model % self.n_heads == 0, "d_model must be divisible by n_heads"
-        assert self.attention_impl in {"dense", "local", "csa"}, "attention_impl must be 'dense', 'local', or 'csa'"
+        assert self.attention_impl in {"dense", "local", "csa", "forgetting"}, "attention_impl must be 'dense', 'local', 'csa', or 'forgetting'"
         self.csa.__post_init__()
+        self.forgetting.__post_init__()

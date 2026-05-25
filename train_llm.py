@@ -15,6 +15,7 @@ from configs.dataset_config import DataConfig
 from training.trainer import train_minimal_llm
 from utils.helpers import set_seed, format_time
 from utils.logger import setup_logging
+from utils.runtime import resolve_device
 
 
 # Worker init function to ensure each worker has a deterministic seed
@@ -28,11 +29,13 @@ def worker_init_fn(worker_id):
 
 
 def print_system_info():
-    device = "CUDA" if torch.cuda.is_available() else "CPU"
-    print(f"Device: {device}")
-    if torch.cuda.is_available():
+    device = resolve_device()
+    print(f"Device: {device.type.upper()}")
+    if device.type == "cuda":
         props = torch.cuda.get_device_properties(0)
         print(f"GPU: {props.name} ({props.total_memory / 1e9:.1f} GB)")
+    elif device.type == "mps":
+        print("GPU: Apple Metal / MPS")
     print(f"PyTorch: {torch.__version__}\n")
 
 
@@ -225,7 +228,7 @@ def main():
     parser.add_argument("--max_train_seconds", type=float, help="Stop after this many active training seconds")
     parser.add_argument("--warmup", type=str, default="true", help="Whether to perform untimed compilation warmup (true/false)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility (default: 42)")
-    parser.add_argument("--attention_impl", choices=["dense", "local", "csa"], help="Attention implementation to train")
+    parser.add_argument("--attention_impl", choices=["dense", "local", "csa", "forgetting"], help="Attention implementation to train")
     parser.add_argument("--csa_compression_block_size", type=int, help="CSA compression block size m")
     parser.add_argument("--csa_top_k", type=int, help="CSA number of compressed blocks selected per token")
     parser.add_argument("--csa_sliding_window_size", type=int, help="CSA local sliding window size")
@@ -234,6 +237,10 @@ def main():
     parser.add_argument("--csa_indexer_dim", type=int, help="CSA indexer key/query head dimension")
     parser.add_argument("--csa_output_groups", type=int, help="CSA grouped output projection groups")
     parser.add_argument("--csa_group_hidden_dim", type=int, help="CSA per-group hidden projection dimension")
+    parser.add_argument("--forgetting_local_window_size", type=int, help="Forgetting attention local window size")
+    parser.add_argument("--forgetting_memory_block_size", type=int, help="Forgetting memory block size")
+    parser.add_argument("--forgetting_memory_decay_rate", type=float, help="Forgetting memory decay per block")
+    parser.add_argument("--forgetting_gate_floor", type=float, help="Minimum forgetting gate value")
 
     args = parser.parse_args()
 
@@ -299,6 +306,14 @@ def main():
         config.csa.output_groups = args.csa_output_groups
     if args.csa_group_hidden_dim is not None:
         config.csa.group_hidden_dim = args.csa_group_hidden_dim
+    if args.forgetting_local_window_size is not None:
+        config.forgetting.local_window_size = args.forgetting_local_window_size
+    if args.forgetting_memory_block_size is not None:
+        config.forgetting.memory_block_size = args.forgetting_memory_block_size
+    if args.forgetting_memory_decay_rate is not None:
+        config.forgetting.memory_decay_rate = args.forgetting_memory_decay_rate
+    if args.forgetting_gate_floor is not None:
+        config.forgetting.gate_floor = args.forgetting_gate_floor
     config.__post_init__()
     
     # Define custom milestones for validation curves and autosetup logging
@@ -392,6 +407,8 @@ def main():
 
         # Prepare datasets (handles caching automatically)
         train_ds, val_ds = prepare_datasets(data_cfg, tokenizer)
+
+    device = resolve_device()
     
     logger.info(f"Train sequences: {len(train_ds):,}, Val sequences: {len(val_ds):,}")
 
@@ -402,7 +419,7 @@ def main():
     loader_args = dict(
         batch_size=config.batch_size,
         num_workers=args.num_workers,
-        pin_memory=torch.cuda.is_available(),
+        pin_memory=device.type == "cuda",
         worker_init_fn=worker_init_fn,
         generator=g,
     )
@@ -417,7 +434,7 @@ def main():
     print(f"d_model: {config.d_model}, layers: {config.n_layers}, heads: {config.n_heads}")
     print(f"ff dim: {config.d_ff}")
     print(f"attention: {config.attention_impl}")
-    if config.attention_impl in {"local", "csa"}:
+    if config.attention_impl in {"local", "csa", "forgetting"}:
         if config.attention_impl == "local":
             print(f"local window: {config.csa.sliding_window_size}")
     if config.attention_impl == "csa":
@@ -428,6 +445,14 @@ def main():
             f"window={config.csa.sliding_window_size}, "
             f"indexer_heads={config.csa.indexer_heads}, "
             f"groups={config.csa.output_groups}"
+        )
+    if config.attention_impl == "forgetting":
+        print(
+            "forgetting: "
+            f"window={config.forgetting.local_window_size}, "
+            f"block={config.forgetting.memory_block_size}, "
+            f"decay={config.forgetting.memory_decay_rate}, "
+            f"gate_floor={config.forgetting.gate_floor}"
         )
     print(f"train tokens: {config.train_tokens:,}")
     if getattr(config, "max_train_seconds", None) is not None:

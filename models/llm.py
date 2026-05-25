@@ -7,7 +7,7 @@ from models.layers import TransformerBlock
 
 
 class MinimalLLM(nn.Module):
-    """Minimal dense LLM"""
+    """Minimal research LLM."""
 
     def __init__(self, config: LLMConfig):
         super().__init__()
@@ -29,6 +29,7 @@ class MinimalLLM(nn.Module):
                     n_kv_heads=config.n_kv_heads,
                     attention_impl=config.attention_impl,
                     csa_config=config.csa,
+                    forgetting_config=config.forgetting,
                 )
                 for i in range(config.n_layers)
             ]

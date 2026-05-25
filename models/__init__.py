@@ -10,6 +10,7 @@ from .compressed_sparse_attention import (
     LightningIndexer,
     TokenCompressor,
 )
+from .forgetting_attention import ForgettingAttention
 
 __all__ = [
     "Rotary",
@@ -17,6 +18,7 @@ __all__ = [
     "TransformerBlock",
     "MinimalLLM",
     "CompressedSparseAttention",
+    "ForgettingAttention",
     "GroupedOutputProjection",
     "LightningIndexer",
     "TokenCompressor",

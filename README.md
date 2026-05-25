@@ -14,6 +14,7 @@ A high-performance codebase for LLM research, pretraining, and optimization: tes
 - CSA mini paper LaTeX: [docs/research/reports/csa_mini_paper_20260524.tex](docs/research/reports/csa_mini_paper_20260524.tex)
 - CSA mini paper PDF: [docs/research/reports/csa_mini_paper_20260524.pdf](docs/research/reports/csa_mini_paper_20260524.pdf)
 - Simple compressed-memory experiment: [docs/research/compressed_memory_simple_experiment.md](docs/research/compressed_memory_simple_experiment.md)
+- Three-way attention policy experiment: [experiments/attention_policy_experiment.py](experiments/attention_policy_experiment.py)
 - GPU runbook: [docs/research/gpu_runbook.md](docs/research/gpu_runbook.md)
 
 - `models/`: Transformer layers and components (RoPE, RMSNorm, Multi-Head Attention).
@@ -82,6 +83,15 @@ Default is an **88M parameter** transformer LLM, you can modify configs.
   - Rotary Positional Embeddings (**RoPE**).
   - Fused QKVO projection for optimized compute.
   - QK-Normalization for training stability.
+- **Research lanes**:
+  - Dense attention baseline.
+  - CSA compressed sparse attention.
+- Forgetting attention with gated compressed memory.
+
+To launch the small three-way research sweep on the MacBook or CUDA:
+```bash
+python experiments/attention_policy_experiment.py
+```
 - **Normalization**: Pre-norm **RMSNorm**.
 - **Activation**: **Squared ReLU** (Primer-style).
 - **Vocab Size**: 49,152.

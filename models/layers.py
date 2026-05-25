@@ -175,6 +175,7 @@ class TransformerBlock(nn.Module):
         n_kv_heads: int | None = None,
         attention_impl: str = "dense",
         csa_config = None,
+        forgetting_config = None,
     ):
         super().__init__()
 
@@ -207,6 +208,22 @@ class TransformerBlock(nn.Module):
                 output_groups=csa_config.output_groups,
                 group_hidden_dim=csa_config.group_hidden_dim,
                 dropout=dropout,
+            )
+        elif attention_impl == "forgetting":
+            if forgetting_config is None:
+                raise ValueError("forgetting_config is required when attention_impl='forgetting'")
+            from .forgetting_attention import ForgettingAttention
+
+            self.attention = ForgettingAttention(
+                d_model=d_model,
+                n_heads=n_heads,
+                max_seq_len=max_seq_len,
+                local_window_size=forgetting_config.local_window_size,
+                memory_block_size=forgetting_config.memory_block_size,
+                memory_decay_rate=forgetting_config.memory_decay_rate,
+                gate_floor=forgetting_config.gate_floor,
+                dropout=dropout,
+                n_kv_heads=n_kv_heads,
             )
         else:
             raise ValueError(f"Unknown attention_impl: {attention_impl}")
