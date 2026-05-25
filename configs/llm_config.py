@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from typing import Optional, Tuple
 from configs.csa_config import CSAConfig
 from configs.forgetting_config import ForgettingConfig
+from configs.memory_policy_config import MemoryPolicyConfig
 
 
 @dataclass
@@ -18,10 +19,13 @@ class LLMConfig:
     # Attention implementation
     # "dense" keeps the original baseline. "local" keeps only a sliding window.
     # "csa" enables local attention plus compressed old memory.
-    # "forgetting" keeps local attention plus gated compressed memory.
+    # "forgetting" / "age_forgetting" keeps local attention plus gated compressed memory.
+    # "usage_refresh", "competition", "hierarchical", and "predictive" are
+    # alternate memory philosophies that share the same local+compressed base.
     attention_impl: str = "dense"
     csa: CSAConfig = field(default_factory=CSAConfig)
     forgetting: ForgettingConfig = field(default_factory=ForgettingConfig)
+    memory_policy: MemoryPolicyConfig = field(default_factory=MemoryPolicyConfig)
     
     # Data params
     # ⚠️ WARNING: For simplicity, I recomend not changing max_seq_len
@@ -63,6 +67,7 @@ class LLMConfig:
     def __post_init__(self):
         self.d_k = self.d_model // self.n_heads
         assert self.d_model % self.n_heads == 0, "d_model must be divisible by n_heads"
-        assert self.attention_impl in {"dense", "local", "csa", "forgetting"}, "attention_impl must be 'dense', 'local', 'csa', or 'forgetting'"
+        assert self.attention_impl in {"dense", "local", "csa", "forgetting", "age_forgetting", "usage_refresh", "competition", "hierarchical", "predictive"}, "attention_impl must be a supported attention policy"
         self.csa.__post_init__()
         self.forgetting.__post_init__()
+        self.memory_policy.__post_init__()

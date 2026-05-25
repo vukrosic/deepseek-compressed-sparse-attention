@@ -11,6 +11,13 @@ from .compressed_sparse_attention import (
     TokenCompressor,
 )
 from .forgetting_attention import ForgettingAttention
+from .memory_policies import (
+    AgeForgettingAttention,
+    CompetitionMemoryAttention,
+    HierarchicalSummarizationAttention,
+    PredictiveImportanceAttention,
+    UsageRefreshAttention,
+)
 
 __all__ = [
     "Rotary",
@@ -19,6 +26,11 @@ __all__ = [
     "MinimalLLM",
     "CompressedSparseAttention",
     "ForgettingAttention",
+    "AgeForgettingAttention",
+    "UsageRefreshAttention",
+    "CompetitionMemoryAttention",
+    "HierarchicalSummarizationAttention",
+    "PredictiveImportanceAttention",
     "GroupedOutputProjection",
     "LightningIndexer",
     "TokenCompressor",

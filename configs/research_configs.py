@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 
 from configs.csa_config import CSAConfig
 from configs.forgetting_config import ForgettingConfig
+from configs.memory_policy_config import MemoryPolicyConfig
 from configs.llm_config import LLMConfig
 
 
@@ -90,6 +91,42 @@ class CSAFiveMillionConfig(LLMConfig):
             indexer_dim=32,
             output_groups=1,
             group_hidden_dim=128,
+        )
+    )
+
+
+@dataclass
+class MemoryFiveMillionConfig(LLMConfig):
+    """Compact ~5M-parameter config for the five memory-philosophy sweep."""
+
+    d_model: int = 256
+    n_heads: int = 8
+    n_kv_heads: int = 4
+    n_layers: int = 6
+    d_ff: int = 1024
+    max_seq_len: int = 256
+    vocab_size: int = 4096
+    compile_model: bool = False
+    batch_size: int = 4
+    gradient_accumulation_steps: int = 2
+    train_tokens: int = 5_000_000
+    muon_lr: float = 0.01
+    adamw_lr: float = 0.002
+    warmup_ratio: float = 0.02
+    weight_decay: float = 0.05
+    use_amp: bool = True
+    memory_policy: MemoryPolicyConfig = field(
+        default_factory=lambda: MemoryPolicyConfig(
+            local_window_size=64,
+            block_size=4,
+            memory_budget_blocks=16,
+            age_decay_rate=0.125,
+            refresh_strength=0.35,
+            competition_capacity=16,
+            hierarchy_levels=2,
+            hierarchy_branching=4,
+            predictive_hidden_dim=32,
+            predictive_top_k=8,
         )
     )
     forgetting: ForgettingConfig = field(

@@ -1,0 +1,235 @@
+\documentclass[10pt,twocolumn]{article}
+
+\usepackage[margin=0.72in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage[hidelinks]{hyperref}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{amsmath}
+
+\graphicspath{{../../../runs/memory_policy/20260525_114946/}}
+
+\setlength{\columnsep}{0.22in}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.45em}
+\renewcommand{\arraystretch}{1.12}
+\setlist[itemize]{leftmargin=1.2em,itemsep=0.2em,topsep=0.25em}
+\makeatletter
+\setlength{\@fptop}{0pt}
+\setlength{\@fpbot}{0pt plus 1fil}
+\setlength{\@fpsep}{8pt}
+\makeatother
+
+\definecolor{PaperBlue}{HTML}{203A63}
+\definecolor{PaperOrange}{HTML}{F59E0B}
+\definecolor{PaperGray}{HTML}{5B6578}
+\definecolor{PaperLight}{HTML}{F8FAFC}
+
+\title{\vspace{-1.1em}\bfseries Five Memory Policies in a 5M Transformer: A Mac Smoke Sweep}
+\author{Vuk Rosic\\\small Independent Research Project}
+\date{May 25, 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We compare six attention styles in the same small transformer scaffold:
+dense attention, age-based forgetting, usage-refresh memory, competition-based
+memory, hierarchical summarization, and predictive importance memory. The goal
+here is not to claim a final winner. It is to verify that the five memory
+philosophies can be implemented, trained, and instrumented in one shared code
+path on a MacBook, while still producing readable plots and tables for later
+NVIDIA runs. In this smoke sweep, validation loss is essentially tied across
+the memory policies, while dense attention is much faster in plain PyTorch.
+\end{abstract}
+
+\section{What We Are Testing}
+
+The research question is simple:
+
+\begin{quote}
+If we keep the model and data fixed, do five different memory philosophies
+produce meaningfully different learning dynamics?
+\end{quote}
+
+The five policies are:
+
+\begin{itemize}
+\item age-based forgetting,
+\item usage-refresh memory,
+\item competition-based memory,
+\item hierarchical summarization memory,
+\item predictive importance memory.
+\end{itemize}
+
+Dense attention is the baseline. It gives every token access to the full causal
+past. The memory policies instead keep a local window and route older context
+through compressed or scored memory blocks.
+
+This report is a smoke test, not the final paper claim. The real purpose is to
+show that the code path is stable, the outputs are legible, and the same
+framework can later be moved to a longer NVIDIA run.
+
+\section{Setup}
+
+Table~\ref{tab:setup} gives the shared configuration. The model is the
+compact 5M-parameter preset discussed earlier in the repo, with a 256-token
+context window. For this Mac sweep, we only train for 2048 tokens so the run
+finishes quickly and the plots are easy to inspect.
+
+\begin{table}[t]
+\centering
+\small
+\caption{Shared setup for the Mac smoke sweep.}
+\label{tab:setup}
+\begin{tabular}{@{}ll@{}}
+\toprule
+Item & Value \\
+\midrule
+Model preset & 5M-parameter transformer \\
+Hidden size & 256 \\
+Layers / heads & 6 / 8 \\
+Context window & 256 \\
+Batch size & 4 \\
+Training budget & 2048 tokens \\
+Seeds & 1 (Mac smoke) \\
+Dataset & synthetic causal copy-lag \\
+Hardware & MacBook / MPS debug run \\
+Main metric & validation loss \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The fairness rule is:
+
+\begin{quote}
+Same model, same data, same batch size, same context length, same optimizer
+settings, and the same tiny training budget.
+\end{quote}
+
+The only thing that changes is attention policy.
+
+For the memory policies, we also track cheap post-run probe metrics. That keeps
+the training loop lightweight and pushes the extra instrumentation into a
+separate pass.
+
+\section{Results}
+
+Table~\ref{tab:results} summarizes the sweep.
+
+\begin{table*}[t]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\caption{Mac smoke results. Peak CUDA memory is not meaningful on this MPS/CPU debug run, so the table emphasizes loss, throughput, and the probe metrics.}
+\label{tab:results}
+\begin{tabular}{@{}lrrrrrrrrrr@{}}
+\toprule
+Policy & Loss & Tok/s & Vec. & Cov. & Gate & Refresh & Util. & Pred. & Sel. & Lvl. \\
+\midrule
+dense & 8.3776 & 1809.5 & 256 & 256 & -- & -- & -- & -- & -- & -- \\
+age-based forgetting & 8.3772 & 166.9 & 80 & 128 & 0.3792 & -- & -- & -- & 1.88 & -- \\
+usage-refresh & 8.3772 & 161.6 & 80 & 128 & 0.4204 & 0.1250 & -- & -- & 1.88 & -- \\
+competition & 8.3772 & 159.7 & 80 & 128 & -- & -- & -2.4697 & -- & 1.44 & -- \\
+hierarchical & 8.3772 & 159.0 & 84 & 128 & 0.9167 & -- & -- & -- & 2.25 & 2.0 \\
+predictive & 8.3798 & 148.6 & 80 & 128 & -- & -- & -- & 0.5001 & 1.44 & -- \\
+\bottomrule
+\end{tabular}
+\end{table*}
+
+The main visual result is that the validation losses are almost indistinguish-
+able on this tiny run, while throughput separates the dense baseline from the
+memory policies very clearly. To make that easier to read, we use a single
+summary figure with loss deltas and throughput ratios instead of two nearly
+identical line charts.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.96\textwidth]{policy_comparison_summary.png}
+\caption{Policy comparison summary. Top-left: absolute validation loss, zoomed
+to the narrow range where the policies differ. Top-right: loss delta relative
+to dense, in milli-loss. Bottom-left: throughput on a log scale. Bottom-right:
+throughput relative to dense. This makes the near-ties in loss and the large
+throughput gap much easier to read at a glance.}
+\label{fig:summary}
+\end{figure*}
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.98\textwidth]{memory_mechanisms_overview.png}
+\caption{One-panel schematics for the five memory philosophies. Each panel
+shows the qualitative mechanism rather than the exact kernel implementation:
+age decay, refresh, competition, hierarchy, and predictive retention.}
+\label{fig:mechanisms}
+\end{figure*}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\linewidth]{gate_by_age.png}
+\caption{Age-based forgetting gate strength decreases with memory age. This is
+the one policy with a visibly monotonic retention curve in the smoke run.}
+\label{fig:gate}
+\end{figure}
+
+\section{Interpretation}
+
+The smoke run says three useful things.
+
+\begin{itemize}
+\item The shared code path works. All six policies train and emit metrics.
+\item The memory policies are visually distinct. The probe plots are not the
+same shape, which is exactly what we wanted from the new abstractions.
+\item This tiny run is not enough to claim a real quality win. Dense is still
+the throughput leader, and the validation losses are almost tied.
+\end{itemize}
+
+That is a good result for a tutorial pipeline. It means the experiment is
+usable, not yet persuasive.
+
+\section{What This Does Not Prove}
+
+This run does \emph{not} prove that any memory philosophy is better than dense.
+It only proves that we can compare them in a consistent harness and capture the
+behavior in plots and tables.
+
+The next real step is the same comparison on NVIDIA, with more tokens and a few
+seeds. Then the question becomes interesting in the research sense:
+
+\begin{quote}
+Do the five memory philosophies separate once the model has enough data and
+enough runtime?
+\end{quote}
+
+\section{Conclusion}
+
+We now have a paper-ready path for the new memory work:
+
+\begin{quote}
+shared model $\rightarrow$ five memory policies $\rightarrow$ one fairness
+rule $\rightarrow$ automated plots and tables $\rightarrow$ PDF report.
+\end{quote}
+
+On the Mac smoke run, the policies are distinguishable and the reporting is in
+place, but the losses are still too close to support a substantive claim. That
+is exactly the kind of honest result a mini research paper should report.
+
+\begin{thebibliography}{9}
+\bibitem{deepseekv4}
+DeepSeek-AI.
+\newblock {\em DeepSeek-V4: Towards Highly Efficient Million-Token Context Intelligence}.
+\newblock 2026.
+
+\bibitem{pytorch}
+A.~Paszke et al.
+\newblock PyTorch: An Imperative Style, High-Performance Deep Learning Library.
+\newblock 2019.
+\end{thebibliography}
+
+\end{document}

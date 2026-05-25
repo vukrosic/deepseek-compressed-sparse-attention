@@ -30,6 +30,7 @@ class MinimalLLM(nn.Module):
                     attention_impl=config.attention_impl,
                     csa_config=config.csa,
                     forgetting_config=config.forgetting,
+                    memory_policy=config.memory_policy,
                 )
                 for i in range(config.n_layers)
             ]
@@ -53,18 +54,25 @@ class MinimalLLM(nn.Module):
         elif isinstance(module, nn.Embedding):
             torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
-    def forward(self, x):
+    def forward(self, x, return_debug: bool = False):
         # Token embeddings
         x = self.token_embedding(x) * math.sqrt(self.config.d_model)
         x = self.position_dropout(x)
 
         # Pass through transformer blocks
+        layer_debugs = []
         for block in self.transformer_blocks:
-            x = block(x)
+            if return_debug:
+                x, debug = block(x, return_debug=True)
+                layer_debugs.append(debug)
+            else:
+                x = block(x)
 
         # Output projection
         x = self.norm(x)
         x = self.output_dropout(x)
         logits = self.lm_head(x)
 
+        if return_debug:
+            return logits, {"layer_debugs": layer_debugs}
         return logits

@@ -176,19 +176,23 @@ class TransformerBlock(nn.Module):
         attention_impl: str = "dense",
         csa_config = None,
         forgetting_config = None,
+        memory_policy = None,
     ):
         super().__init__()
 
         if attention_impl == "dense":
             self.attention = MultiHeadAttention(d_model, n_heads, max_seq_len, dropout, n_kv_heads)
         elif attention_impl == "local":
-            if csa_config is None:
-                raise ValueError("csa_config is required when attention_impl='local'")
+            window_size = getattr(memory_policy, "local_window_size", None)
+            if window_size is None and csa_config is not None:
+                window_size = csa_config.sliding_window_size
+            if window_size is None:
+                raise ValueError("memory_policy.local_window_size is required when attention_impl='local'")
             self.attention = LocalSlidingWindowAttention(
                 d_model=d_model,
                 n_heads=n_heads,
                 max_seq_len=max_seq_len,
-                window_size=csa_config.sliding_window_size,
+                window_size=window_size,
                 dropout=dropout,
                 n_kv_heads=n_kv_heads,
             )
@@ -209,19 +213,104 @@ class TransformerBlock(nn.Module):
                 group_hidden_dim=csa_config.group_hidden_dim,
                 dropout=dropout,
             )
-        elif attention_impl == "forgetting":
-            if forgetting_config is None:
-                raise ValueError("forgetting_config is required when attention_impl='forgetting'")
-            from .forgetting_attention import ForgettingAttention
+        elif attention_impl in {"forgetting", "age_forgetting"}:
+            if memory_policy is not None:
+                from .memory_policies import AgeForgettingAttention
 
-            self.attention = ForgettingAttention(
+                self.attention = AgeForgettingAttention(
+                    d_model=d_model,
+                    n_heads=n_heads,
+                    max_seq_len=max_seq_len,
+                    local_window_size=memory_policy.local_window_size,
+                    block_size=memory_policy.block_size,
+                    memory_budget_blocks=memory_policy.memory_budget_blocks,
+                    age_decay_rate=memory_policy.age_decay_rate,
+                    gate_floor=memory_policy.gate_floor,
+                    dropout=dropout,
+                    n_kv_heads=n_kv_heads,
+                )
+            else:
+                if forgetting_config is None:
+                    raise ValueError("forgetting_config is required when attention_impl='forgetting'")
+                from .forgetting_attention import ForgettingAttention
+
+                self.attention = ForgettingAttention(
+                    d_model=d_model,
+                    n_heads=n_heads,
+                    max_seq_len=max_seq_len,
+                    local_window_size=forgetting_config.local_window_size,
+                    memory_block_size=forgetting_config.memory_block_size,
+                    memory_decay_rate=forgetting_config.memory_decay_rate,
+                    gate_floor=forgetting_config.gate_floor,
+                    dropout=dropout,
+                    n_kv_heads=n_kv_heads,
+                )
+        elif attention_impl == "usage_refresh":
+            if memory_policy is None:
+                raise ValueError("memory_policy is required when attention_impl='usage_refresh'")
+            from .memory_policies import UsageRefreshAttention
+
+            self.attention = UsageRefreshAttention(
                 d_model=d_model,
                 n_heads=n_heads,
                 max_seq_len=max_seq_len,
-                local_window_size=forgetting_config.local_window_size,
-                memory_block_size=forgetting_config.memory_block_size,
-                memory_decay_rate=forgetting_config.memory_decay_rate,
-                gate_floor=forgetting_config.gate_floor,
+                local_window_size=memory_policy.local_window_size,
+                block_size=memory_policy.block_size,
+                memory_budget_blocks=memory_policy.memory_budget_blocks,
+                age_decay_rate=memory_policy.age_decay_rate,
+                refresh_strength=memory_policy.refresh_strength,
+                gate_floor=memory_policy.gate_floor,
+                dropout=dropout,
+                n_kv_heads=n_kv_heads,
+            )
+        elif attention_impl == "competition":
+            if memory_policy is None:
+                raise ValueError("memory_policy is required when attention_impl='competition'")
+            from .memory_policies import CompetitionMemoryAttention
+
+            self.attention = CompetitionMemoryAttention(
+                d_model=d_model,
+                n_heads=n_heads,
+                max_seq_len=max_seq_len,
+                local_window_size=memory_policy.local_window_size,
+                block_size=memory_policy.block_size,
+                memory_budget_blocks=memory_policy.memory_budget_blocks,
+                competition_capacity=memory_policy.competition_capacity,
+                age_decay_rate=memory_policy.age_decay_rate,
+                dropout=dropout,
+                n_kv_heads=n_kv_heads,
+            )
+        elif attention_impl == "hierarchical":
+            if memory_policy is None:
+                raise ValueError("memory_policy is required when attention_impl='hierarchical'")
+            from .memory_policies import HierarchicalSummarizationAttention
+
+            self.attention = HierarchicalSummarizationAttention(
+                d_model=d_model,
+                n_heads=n_heads,
+                max_seq_len=max_seq_len,
+                local_window_size=memory_policy.local_window_size,
+                block_size=memory_policy.block_size,
+                memory_budget_blocks=memory_policy.memory_budget_blocks,
+                hierarchy_levels=memory_policy.hierarchy_levels,
+                hierarchy_branching=memory_policy.hierarchy_branching,
+                dropout=dropout,
+                n_kv_heads=n_kv_heads,
+            )
+        elif attention_impl == "predictive":
+            if memory_policy is None:
+                raise ValueError("memory_policy is required when attention_impl='predictive'")
+            from .memory_policies import PredictiveImportanceAttention
+
+            self.attention = PredictiveImportanceAttention(
+                d_model=d_model,
+                n_heads=n_heads,
+                max_seq_len=max_seq_len,
+                local_window_size=memory_policy.local_window_size,
+                block_size=memory_policy.block_size,
+                memory_budget_blocks=memory_policy.memory_budget_blocks,
+                predictive_hidden_dim=memory_policy.predictive_hidden_dim,
+                predictive_top_k=memory_policy.predictive_top_k,
                 dropout=dropout,
                 n_kv_heads=n_kv_heads,
             )
@@ -235,12 +324,27 @@ class TransformerBlock(nn.Module):
         self.norm2 = nn.RMSNorm(d_model)
         self.dropout = nn.Dropout(dropout)
 
-    def forward(self, x):
+    def forward(self, x, return_debug: bool = False):
         # Self-attention
-        attn_out = self.attention(self.norm1(x))
+        norm_x = self.norm1(x)
+        if return_debug:
+            try:
+                attn_result = self.attention(norm_x, return_debug=True)
+            except TypeError:
+                attn_result = self.attention(norm_x)
+        else:
+            attn_result = self.attention(norm_x)
+
+        if isinstance(attn_result, tuple):
+            attn_out, attn_debug = attn_result
+        else:
+            attn_out, attn_debug = attn_result, None
+
         x = x + self.dropout(attn_out)
 
         # Feed-forward
         ff_out = self.feed_forward(self.norm2(x))
         x = x + self.dropout(ff_out)
+        if return_debug:
+            return x, {"attention": attn_debug}
         return x

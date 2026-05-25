@@ -229,7 +229,11 @@ def main():
     parser.add_argument("--warmup", type=str, default="true", help="Whether to perform untimed compilation warmup (true/false)")
     parser.add_argument("--use_amp", type=str, help="Whether to use mixed precision (true/false)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility (default: 42)")
-    parser.add_argument("--attention_impl", choices=["dense", "local", "csa", "forgetting"], help="Attention implementation to train")
+    parser.add_argument(
+        "--attention_impl",
+        choices=["dense", "local", "csa", "forgetting", "age_forgetting", "usage_refresh", "competition", "hierarchical", "predictive"],
+        help="Attention implementation to train",
+    )
     parser.add_argument("--csa_compression_block_size", type=int, help="CSA compression block size m")
     parser.add_argument("--csa_top_k", type=int, help="CSA number of compressed blocks selected per token")
     parser.add_argument("--csa_sliding_window_size", type=int, help="CSA local sliding window size")
@@ -242,6 +246,17 @@ def main():
     parser.add_argument("--forgetting_memory_block_size", type=int, help="Forgetting memory block size")
     parser.add_argument("--forgetting_memory_decay_rate", type=float, help="Forgetting memory decay per block")
     parser.add_argument("--forgetting_gate_floor", type=float, help="Minimum forgetting gate value")
+    parser.add_argument("--memory_local_window_size", type=int, help="Shared memory local window size")
+    parser.add_argument("--memory_block_size", type=int, help="Shared memory block size")
+    parser.add_argument("--memory_budget_blocks", type=int, help="Shared memory budget in blocks")
+    parser.add_argument("--memory_age_decay_rate", type=float, help="Age-based decay rate")
+    parser.add_argument("--memory_refresh_strength", type=float, help="Usage refresh strength")
+    parser.add_argument("--memory_gate_floor", type=float, help="Minimum memory gate value")
+    parser.add_argument("--memory_competition_capacity", type=int, help="Top-k capacity for competition memory")
+    parser.add_argument("--memory_hierarchy_levels", type=int, help="Hierarchy depth for recursive summaries")
+    parser.add_argument("--memory_hierarchy_branching", type=int, help="Hierarchy branching factor")
+    parser.add_argument("--memory_predictive_hidden_dim", type=int, help="Hidden dim for predictive scorer")
+    parser.add_argument("--memory_predictive_top_k", type=int, help="Top-k blocks for predictive memory")
 
     args = parser.parse_args()
 
@@ -317,6 +332,28 @@ def main():
         config.forgetting.memory_decay_rate = args.forgetting_memory_decay_rate
     if args.forgetting_gate_floor is not None:
         config.forgetting.gate_floor = args.forgetting_gate_floor
+    if args.memory_local_window_size is not None:
+        config.memory_policy.local_window_size = args.memory_local_window_size
+    if args.memory_block_size is not None:
+        config.memory_policy.block_size = args.memory_block_size
+    if args.memory_budget_blocks is not None:
+        config.memory_policy.memory_budget_blocks = args.memory_budget_blocks
+    if args.memory_age_decay_rate is not None:
+        config.memory_policy.age_decay_rate = args.memory_age_decay_rate
+    if args.memory_refresh_strength is not None:
+        config.memory_policy.refresh_strength = args.memory_refresh_strength
+    if args.memory_gate_floor is not None:
+        config.memory_policy.gate_floor = args.memory_gate_floor
+    if args.memory_competition_capacity is not None:
+        config.memory_policy.competition_capacity = args.memory_competition_capacity
+    if args.memory_hierarchy_levels is not None:
+        config.memory_policy.hierarchy_levels = args.memory_hierarchy_levels
+    if args.memory_hierarchy_branching is not None:
+        config.memory_policy.hierarchy_branching = args.memory_hierarchy_branching
+    if args.memory_predictive_hidden_dim is not None:
+        config.memory_policy.predictive_hidden_dim = args.memory_predictive_hidden_dim
+    if args.memory_predictive_top_k is not None:
+        config.memory_policy.predictive_top_k = args.memory_predictive_top_k
     config.__post_init__()
     
     # Define custom milestones for validation curves and autosetup logging
@@ -437,9 +474,9 @@ def main():
     print(f"d_model: {config.d_model}, layers: {config.n_layers}, heads: {config.n_heads}")
     print(f"ff dim: {config.d_ff}")
     print(f"attention: {config.attention_impl}")
-    if config.attention_impl in {"local", "csa", "forgetting"}:
+    if config.attention_impl in {"local", "csa", "forgetting", "age_forgetting", "usage_refresh", "competition", "hierarchical", "predictive"}:
         if config.attention_impl == "local":
-            print(f"local window: {config.csa.sliding_window_size}")
+            print(f"local window: {config.memory_policy.local_window_size}")
     if config.attention_impl == "csa":
         print(
             "csa: "
@@ -449,13 +486,49 @@ def main():
             f"indexer_heads={config.csa.indexer_heads}, "
             f"groups={config.csa.output_groups}"
         )
-    if config.attention_impl == "forgetting":
+    if config.attention_impl in {"forgetting", "age_forgetting"}:
         print(
             "forgetting: "
-            f"window={config.forgetting.local_window_size}, "
-            f"block={config.forgetting.memory_block_size}, "
-            f"decay={config.forgetting.memory_decay_rate}, "
-            f"gate_floor={config.forgetting.gate_floor}"
+            f"window={config.memory_policy.local_window_size}, "
+            f"block={config.memory_policy.block_size}, "
+            f"budget={config.memory_policy.memory_budget_blocks}, "
+            f"decay={config.memory_policy.age_decay_rate}, "
+            f"gate_floor={config.memory_policy.gate_floor}"
+        )
+    if config.attention_impl == "usage_refresh":
+        print(
+            "usage_refresh: "
+            f"window={config.memory_policy.local_window_size}, "
+            f"block={config.memory_policy.block_size}, "
+            f"budget={config.memory_policy.memory_budget_blocks}, "
+            f"decay={config.memory_policy.age_decay_rate}, "
+            f"refresh={config.memory_policy.refresh_strength}"
+        )
+    if config.attention_impl == "competition":
+        print(
+            "competition: "
+            f"window={config.memory_policy.local_window_size}, "
+            f"block={config.memory_policy.block_size}, "
+            f"budget={config.memory_policy.memory_budget_blocks}, "
+            f"capacity={config.memory_policy.competition_capacity}"
+        )
+    if config.attention_impl == "hierarchical":
+        print(
+            "hierarchical: "
+            f"window={config.memory_policy.local_window_size}, "
+            f"block={config.memory_policy.block_size}, "
+            f"budget={config.memory_policy.memory_budget_blocks}, "
+            f"levels={config.memory_policy.hierarchy_levels}, "
+            f"branching={config.memory_policy.hierarchy_branching}"
+        )
+    if config.attention_impl == "predictive":
+        print(
+            "predictive: "
+            f"window={config.memory_policy.local_window_size}, "
+            f"block={config.memory_policy.block_size}, "
+            f"budget={config.memory_policy.memory_budget_blocks}, "
+            f"hidden={config.memory_policy.predictive_hidden_dim}, "
+            f"top_k={config.memory_policy.predictive_top_k}"
         )
     print(f"train tokens: {config.train_tokens:,}")
     if getattr(config, "max_train_seconds", None) is not None:

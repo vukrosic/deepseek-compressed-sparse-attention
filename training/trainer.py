@@ -363,6 +363,7 @@ def train_model(
         metrics_data = {
             'final_metrics': final_eval,
             'total_time_minutes': total_time_seconds / 60,
+            'total_wall_time_seconds': total_time_seconds,
             'active_training_time_seconds': total_time_seconds,
             'tokens_seen': tokens_seen,
             'tokens_per_second': tokens_per_second,
@@ -397,6 +398,7 @@ def train_model(
         'final_metrics': final_eval,
         'metrics_history': metrics_history,
         'training_time': total_time_seconds,
+        'total_wall_time_seconds': total_time_seconds,
         'steps': step,
         'tokens_seen': tokens_seen,
         'tokens_per_second': tokens_per_second,
