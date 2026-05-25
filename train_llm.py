@@ -227,6 +227,7 @@ def main():
     parser.add_argument("--log_every", type=int, default=100, help="Logging frequency in steps")
     parser.add_argument("--max_train_seconds", type=float, help="Stop after this many active training seconds")
     parser.add_argument("--warmup", type=str, default="true", help="Whether to perform untimed compilation warmup (true/false)")
+    parser.add_argument("--use_amp", type=str, help="Whether to use mixed precision (true/false)")
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility (default: 42)")
     parser.add_argument("--attention_impl", choices=["dense", "local", "csa", "forgetting"], help="Attention implementation to train")
     parser.add_argument("--csa_compression_block_size", type=int, help="CSA compression block size m")
@@ -288,6 +289,8 @@ def main():
         config.log_every = args.log_every
     if args.max_train_seconds is not None:
         config.max_train_seconds = args.max_train_seconds
+    if args.use_amp is not None:
+        config.use_amp = (args.use_amp.lower() == "true")
     if args.attention_impl is not None:
         config.attention_impl = args.attention_impl
     if args.csa_compression_block_size is not None:

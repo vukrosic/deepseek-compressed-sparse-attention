@@ -15,6 +15,7 @@ def evaluate_model(model: nn.Module, val_loader: DataLoader, config: LLMConfig):
     total_correct = 0
 
     device = next(model.parameters()).device
+    use_amp = bool(config.use_amp and device.type == "cuda")
 
     with torch.no_grad():
         for i, batch in enumerate(val_loader):
@@ -41,7 +42,7 @@ def evaluate_model(model: nn.Module, val_loader: DataLoader, config: LLMConfig):
             if attention_mask is not None:
                 attention_mask = attention_mask.to(device)
 
-            with autocast_for_device(device, enabled=config.use_amp):
+            with autocast_for_device(device, enabled=use_amp):
                 # Dense model evaluation
                 logits = model(x)
                 # Shift for causal LM: predict next token

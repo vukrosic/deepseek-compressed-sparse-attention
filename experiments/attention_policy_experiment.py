@@ -1,18 +1,19 @@
 import argparse
 import csv
 import json
+import math
 import subprocess
 import sys
 import time
 from pathlib import Path
-from statistics import mean, stdev
+from statistics import mean
 
 
-CONDITIONS = [
-    ("dense", "dense", None),
-    ("csa", "csa", 4),
-    ("forgetting", "forgetting", None),
-]
+ALL_CONDITIONS = {
+    "dense": ("dense", None),
+    "csa": ("csa", 4),
+    "forgetting": ("forgetting", None),
+}
 
 CONDITION_ORDER = ["dense", "csa", "forgetting"]
 
@@ -54,6 +55,8 @@ def build_command(args, attention_impl: str, top_k: int | None, output_dir: Path
         args.compile,
         "--warmup",
         args.warmup,
+        "--use_amp",
+        args.use_amp,
         "--seed",
         str(seed),
         "--num_workers",
@@ -83,6 +86,10 @@ def build_command(args, attention_impl: str, top_k: int | None, output_dir: Path
         )
     if args.max_train_seconds is not None:
         command.extend(["--max_train_seconds", str(args.max_train_seconds)])
+    if args.adamw_lr is not None:
+        command.extend(["--adamw_lr", str(args.adamw_lr)])
+    if args.muon_lr is not None:
+        command.extend(["--muon_lr", str(args.muon_lr)])
 
     if attention_impl == "csa":
         command.extend(
@@ -194,12 +201,17 @@ def build_aggregate(rows: list[dict]) -> list[dict]:
         tokens_seen = numeric_values(condition_rows, "tokens_seen")
         peak_alloc = numeric_values(condition_rows, "peak_cuda_memory_allocated_gib")
 
+        val_std = 0.0
+        if len(losses) > 1:
+            val_mean = mean(losses)
+            val_std = math.sqrt(sum((x - val_mean) ** 2 for x in losses) / (len(losses) - 1))
+
         aggregate.append(
             {
                 "condition": condition,
                 "runs": len(condition_rows),
                 "val_loss_mean": mean(losses),
-                "val_loss_std": stdev(losses) if len(losses) > 1 else 0.0,
+                "val_loss_std": val_std,
                 "tokens_per_second_mean": mean(toks_per_sec) if toks_per_sec else None,
                 "tokens_seen_mean": mean(tokens_seen) if tokens_seen else None,
                 "peak_cuda_memory_allocated_gib_mean": mean(peak_alloc) if peak_alloc else None,
@@ -334,10 +346,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run dense vs CSA vs forgetting attention policy comparisons.")
     parser.add_argument("--repo_root", default=".", help="Repository root")
     parser.add_argument("--run_root", default="runs/attention_policy", help="Output root")
+    parser.add_argument("--conditions", default="dense,forgetting", help="Comma-separated conditions to run, e.g. dense,forgetting")
     parser.add_argument("--train_tokens", type=int, default=5_000_000)
     parser.add_argument("--max_train_seconds", type=float)
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=2)
+    parser.add_argument("--adamw_lr", type=float, default=0.0005)
+    parser.add_argument("--muon_lr", type=float, default=None)
     parser.add_argument("--dataset_path")
     parser.add_argument("--config_class", default="configs.research_configs.CSAFiveMillionConfig")
     parser.add_argument("--synthetic_data", choices=["true", "false"], default="true")
@@ -348,6 +363,7 @@ def main() -> None:
     parser.add_argument("--num_workers", type=int, default=0)
     parser.add_argument("--compile", choices=["true", "false"], default="false")
     parser.add_argument("--warmup", choices=["true", "false"], default="false")
+    parser.add_argument("--use_amp", choices=["true", "false"], default="false")
     parser.add_argument("--seeds", default="42", help="Comma-separated seeds, for example: 42,43,44")
     parser.add_argument("--csa_top_k", type=int, default=4)
     parser.add_argument("--csa_compression_block_size", type=int, default=4)
@@ -366,9 +382,17 @@ def main() -> None:
     manifest_path = root / "manifest.jsonl"
 
     rows = []
+    selected_conditions = [c.strip() for c in args.conditions.split(",") if c.strip()]
+    runs = []
+    for condition in selected_conditions:
+        if condition not in ALL_CONDITIONS:
+            raise ValueError(f"Unknown condition: {condition}")
+        attention_impl, default_top_k = ALL_CONDITIONS[condition]
+        runs.append((condition, attention_impl, default_top_k))
+
     with manifest_path.open("w") as manifest:
         for seed in parse_seeds(args.seeds):
-            for condition, attention_impl, default_top_k in CONDITIONS:
+            for condition, attention_impl, default_top_k in runs:
                 top_k = args.csa_top_k if condition == "csa" else default_top_k
                 record = run_one(args, condition, attention_impl, top_k, seed, root)
                 manifest.write(json.dumps(record) + "\n")

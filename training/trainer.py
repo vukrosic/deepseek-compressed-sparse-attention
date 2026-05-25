@@ -126,7 +126,8 @@ def train_model(
         model, final_metrics, metrics_history
     """
     device = resolve_device()
-    model = model.to(device, dtype=model_dtype_for_device(device, config.use_amp))
+    use_amp = bool(config.use_amp and device.type == "cuda")
+    model = model.to(device, dtype=model_dtype_for_device(device, use_amp))
     
     if schedulers is None:
         schedulers = []
@@ -187,7 +188,7 @@ def train_model(
             batch_tokens = x.numel()
 
             # Forward pass (optimized to avoid large contiguous copies of logits)
-            if config.use_amp:
+            if use_amp:
                 with autocast_for_device(device, enabled=True):
                     logits = model(x)
                     # Shift labels instead of logits to save ~3GB VRAM
@@ -421,6 +422,7 @@ def warmup_compiled_kernels(
     """
     print(f"🔥 Warming up kernels ({num_steps} steps)...")
     model.train()
+    use_amp = bool(config.use_amp and device.type == "cuda")
     
     # Temporary optimizer to warm up optimizer kernels too
     temp_optimizers = setup_muon_optimizer(model, config, device=device)
@@ -441,7 +443,7 @@ def warmup_compiled_kernels(
             x, y = batch[0].to(device), batch[-1].to(device)
         
         # Forward + Backward
-        if config.use_amp:
+        if use_amp:
             with autocast_for_device(device, enabled=True):
                 logits = model(x)
                 loss = F.cross_entropy(
@@ -489,7 +491,8 @@ def train_minimal_llm(
     seed = getattr(config, "seed", 42)
     set_seed(seed)
     model = MinimalLLM(config)
-    model = model.to(device, dtype=model_dtype_for_device(device, config.use_amp))
+    use_amp = bool(config.use_amp and device.type == "cuda")
+    model = model.to(device, dtype=model_dtype_for_device(device, use_amp))
     
     # Load pretrained weights if specified
     if load_weights_path:
