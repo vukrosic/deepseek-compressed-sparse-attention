@@ -26,6 +26,7 @@ from utils.runtime import model_dtype_for_device, resolve_device
 
 CONDITIONS = {
     "dense": "dense",
+    "csa": "csa",
     "age_forgetting": "age_forgetting",
     "usage_refresh": "usage_refresh",
     "competition": "competition",
@@ -257,6 +258,14 @@ def probe_run(output_dir: Path, args, device: torch.device) -> dict:
     if config.attention_impl == "dense":
         probe["probe_attention_vector_budget"] = config.max_seq_len
         probe["probe_raw_token_equivalent_coverage"] = config.max_seq_len
+    elif config.attention_impl == "csa":
+        probe["probe_attention_vector_budget"] = (
+            config.csa.sliding_window_size + config.csa.top_k
+        )
+        probe["probe_raw_token_equivalent_coverage"] = (
+            config.csa.sliding_window_size
+            + config.csa.top_k * config.csa.compression_block_size
+        )
     elif probe.get("probe_attention_vector_budget") is None:
         probe["probe_attention_vector_budget"] = (
             config.memory_policy.local_window_size + config.memory_policy.memory_budget_blocks
@@ -664,12 +673,12 @@ def run_one(args, condition: str, attention_impl: str, seed: int, root: Path) ->
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Run the five memory-policy research sweep.")
+    parser = argparse.ArgumentParser(description="Run dense, CSA, and five memory-policy research sweeps.")
     parser.add_argument("--repo_root", default=".", help="Repository root")
     parser.add_argument("--run_root", default="runs/memory_policy", help="Output root")
-    parser.add_argument("--conditions", default="dense,age_forgetting,usage_refresh,competition,hierarchical,predictive", help="Comma-separated conditions to run")
+    parser.add_argument("--conditions", default="dense,csa,age_forgetting,usage_refresh,competition,hierarchical,predictive", help="Comma-separated conditions to run")
     parser.add_argument("--seeds", default="42", help="Comma-separated seeds")
-    parser.add_argument("--train_tokens", type=int, default=20_000)
+    parser.add_argument("--train_tokens", type=int, default=5_000_000)
     parser.add_argument("--max_train_seconds", type=float)
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--gradient_accumulation_steps", type=int, default=2)

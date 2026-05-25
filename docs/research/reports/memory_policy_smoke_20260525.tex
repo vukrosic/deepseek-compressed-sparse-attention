@@ -43,11 +43,14 @@
 We compare six attention styles in the same small transformer scaffold:
 dense attention, age-based forgetting, usage-refresh memory, competition-based
 memory, hierarchical summarization, and predictive importance memory. The goal
-here is not to claim a final winner. It is to verify that the five memory
+here is not to claim a final winner. It is to verify that the memory
 philosophies can be implemented, trained, and instrumented in one shared code
 path on a MacBook, while still producing readable plots and tables for later
-NVIDIA runs. In this smoke sweep, validation loss is essentially tied across
-the memory policies, while dense attention is much faster in plain PyTorch.
+NVIDIA runs. This PDF is a smoke report, so its 2048-token training budget is
+only for the debug pass; the intended research sweep uses 5,000,000 tokens per
+condition and includes a plain CSA baseline as a seventh comparison point.
+In this smoke sweep, validation loss is essentially tied across the memory
+policies, while dense attention is much faster in plain PyTorch.
 \end{abstract}
 
 \section{What We Are Testing}
@@ -81,13 +84,16 @@ framework can later be moved to a longer NVIDIA run.
 
 Table~\ref{tab:setup} gives the shared configuration. The model is the
 compact 5M-parameter preset discussed earlier in the repo, with a 256-token
-context window. For this Mac sweep, we only train for 2048 tokens so the run
-finishes quickly and the plots are easy to inspect.
+context window. For this Mac smoke sweep, we only train for 2048 tokens so the
+run finishes quickly and the plots are easy to inspect. The real research
+budget is 5,000,000 tokens per condition.
 
 \begin{table}[t]
 \centering
 \small
-\caption{Shared setup for the Mac smoke sweep.}
+\caption{Shared setup for the Mac smoke sweep. The 2048-token budget here is
+only for the smoke pass; the real research sweep uses 5,000,000 tokens per
+condition.}
 \label{tab:setup}
 \begin{tabular}{@{}ll@{}}
 \toprule
@@ -98,7 +104,8 @@ Hidden size & 256 \\
 Layers / heads & 6 / 8 \\
 Context window & 256 \\
 Batch size & 4 \\
-Training budget & 2048 tokens \\
+Smoke budget & 2048 tokens \\
+Target research budget & 5,000,000 tokens/condition \\
 Seeds & 1 (Mac smoke) \\
 Dataset & synthetic causal copy-lag \\
 Hardware & MacBook / MPS debug run \\
