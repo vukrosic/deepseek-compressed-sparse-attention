@@ -17,8 +17,17 @@ class MemoryPolicyConfig:
     hierarchy_levels: int = 2
     hierarchy_branching: int = 4
 
+    periodic_stride: int = 4
+    router_hidden_dim: int = 64
+    router_top_k: int = 8
     predictive_hidden_dim: int = 32
     predictive_top_k: int = 8
+
+    # New mechanisms (v2)
+    surprise_hidden_dim: int = 64
+    surprise_top_k: int = 8
+    frequency_top_k: int = 8
+    token_merge_ratio: float = 0.5
 
     def __post_init__(self):
         if self.local_window_size <= 0:
@@ -39,7 +48,21 @@ class MemoryPolicyConfig:
             raise ValueError("hierarchy_levels must be positive")
         if self.hierarchy_branching <= 1:
             raise ValueError("hierarchy_branching must be greater than 1")
+        if self.periodic_stride <= 0:
+            raise ValueError("periodic_stride must be positive")
+        if self.router_hidden_dim <= 0:
+            raise ValueError("router_hidden_dim must be positive")
+        if self.router_top_k <= 0:
+            raise ValueError("router_top_k must be positive")
         if self.predictive_hidden_dim <= 0:
             raise ValueError("predictive_hidden_dim must be positive")
         if self.predictive_top_k <= 0:
             raise ValueError("predictive_top_k must be positive")
+        if self.surprise_hidden_dim <= 0:
+            raise ValueError("surprise_hidden_dim must be positive")
+        if self.surprise_top_k <= 0:
+            raise ValueError("surprise_top_k must be positive")
+        if self.frequency_top_k <= 0:
+            raise ValueError("frequency_top_k must be positive")
+        if not (0.0 < self.token_merge_ratio < 1.0):
+            raise ValueError("token_merge_ratio must be in (0, 1)")

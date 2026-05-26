@@ -14,7 +14,7 @@
 \usepackage{enumitem}
 \usepackage{amsmath}
 
-\graphicspath{{../../../runs/memory_policy/20260525_114946/}}
+\graphicspath{{../../../runs/memory_policy/20260525_114946/}{../../../runs/memory_policy_7way_mac_pilot/20260525_133149/}}
 
 \setlength{\columnsep}{0.22in}
 \setlength{\parindent}{0pt}
@@ -226,6 +226,34 @@ rule $\rightarrow$ automated plots and tables $\rightarrow$ PDF report.
 On the Mac smoke run, the policies are distinguishable and the reporting is in
 place, but the losses are still too close to support a substantive claim. That
 is exactly the kind of honest result a mini research paper should report.
+
+\section{Token Curves and Noise}
+
+The better question for the next pass is not just whether the final losses are
+close, but whether the \emph{loss-vs-tokens} curves separate early enough to
+matter. Figure~\ref{fig:curves} shows the 20k-token Mac pilot that includes
+dense attention, plain CSA, and the five memory philosophies in one view.
+
+On this scale, the observed final loss spread is only about 0.01. That is a
+practical noise floor for the Mac smoke setup:
+
+\begin{quote}
+If two curves differ by less than roughly 0.01 validation loss here, treat the
+gap as noise unless it repeats across seeds or token budgets.
+\end{quote}
+
+This is why the next NVIDIA run should focus on token-scaled curves, not just a
+single end-point number.
+
+\begin{figure*}[t]
+\centering
+\includegraphics[width=0.98\textwidth]{loss_vs_tokens_by_policy.png}
+\caption{Validation loss versus training tokens on the 20k-token Mac pilot.
+The curves are nearly on top of each other, which makes the practical noise
+rule easy to see: differences smaller than about 0.01 loss at this scale are
+not yet convincing.}
+\label{fig:curves}
+\end{figure*}
 
 \begin{thebibliography}{9}
 \bibitem{deepseekv4}

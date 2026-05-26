@@ -258,6 +258,23 @@ csa-k2
 csa-k8
 ```
 
+## 7. Smoke-Scale Reading Rule
+
+For the Mac smoke run, the main visual is the validation-loss curve versus
+training tokens, not the final scalar alone.
+
+Use this practical rule for the 20k-token Mac pilot:
+
+```text
+< 0.01 validation-loss gap: noise
+0.01 to 0.03: interesting, but not decisive
+> 0.03: worth following up
+```
+
+This rule is only for the small debug-scale run. On NVIDIA, keep the same
+curves, then decide whether the separation persists across larger token
+budgets or multiple seeds.
+
 ## 7. Paper Claim Rules
 
 Allowed claim:

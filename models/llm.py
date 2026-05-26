@@ -9,9 +9,10 @@ from models.layers import TransformerBlock
 class MinimalLLM(nn.Module):
     """Minimal research LLM."""
 
-    def __init__(self, config: LLMConfig):
+    def __init__(self, config: LLMConfig, novel_attention_modules: dict[str, nn.Module] | None = None):
         super().__init__()
         self.config = config
+        self.novel_attention_modules = novel_attention_modules or {}
 
         # Token embeddings
         self.token_embedding = nn.Embedding(config.vocab_size, config.d_model)
@@ -31,6 +32,7 @@ class MinimalLLM(nn.Module):
                     csa_config=config.csa,
                     forgetting_config=config.forgetting,
                     memory_policy=config.memory_policy,
+                    novel_attention=self.novel_attention_modules.get(config.attention_impl),
                 )
                 for i in range(config.n_layers)
             ]

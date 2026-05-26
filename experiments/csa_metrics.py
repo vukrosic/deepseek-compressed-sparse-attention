@@ -25,15 +25,35 @@ def attention_budget(config) -> Dict[str, float | int | None]:
             "dense_avg_causal_budget": seq_len / 2,
         }
 
-    if config.attention_impl == "forgetting":
-        forgetting = config.forgetting
-        window = min(forgetting.local_window_size, seq_len)
-        memory_tokens = max(0, seq_len - window)
-        memory_blocks = (memory_tokens + forgetting.memory_block_size - 1) // forgetting.memory_block_size
+    if config.attention_impl in {
+        "forgetting",
+        "age_forgetting",
+        "age_forgetting_exponential",
+        "age_forgetting_sigmoid",
+        "age_forgetting_cosine",
+        "age_forgetting_reciprocal",
+        "age_forgetting_hard_cutoff",
+        "random_keyframe",
+        "periodic_keyframe",
+        "learned_router",
+        "salience_memory",
+        "compressed_memory",
+        "usage_refresh",
+        "competition",
+        "hierarchical",
+        "predictive",
+    }:
+        policy = config.memory_policy
+        window = min(policy.local_window_size, seq_len)
+        memory_blocks = min(policy.memory_budget_blocks, max(0, (seq_len - window + policy.block_size - 1) // policy.block_size))
+        if config.attention_impl == "competition":
+            memory_blocks = min(memory_blocks, policy.competition_capacity)
+        if config.attention_impl == "predictive":
+            memory_blocks = min(memory_blocks, policy.predictive_top_k)
         return {
             "attention_vector_budget": window + memory_blocks,
             "attention_vector_budget_max": window + memory_blocks,
-            "raw_token_equivalent_coverage": window + memory_blocks * forgetting.memory_block_size,
+            "raw_token_equivalent_coverage": window + memory_blocks * policy.block_size,
             "dense_avg_causal_budget": seq_len / 2,
         }
 
@@ -81,6 +101,25 @@ def hardware_metadata() -> Dict[str, Any]:
 
 def build_run_metadata(config) -> Dict[str, Any]:
     csa = config.csa
+    policy = config.memory_policy
+    memory_impls = {
+        "forgetting",
+        "age_forgetting",
+        "age_forgetting_exponential",
+        "age_forgetting_sigmoid",
+        "age_forgetting_cosine",
+        "age_forgetting_reciprocal",
+        "age_forgetting_hard_cutoff",
+        "random_keyframe",
+        "periodic_keyframe",
+        "learned_router",
+        "salience_memory",
+        "compressed_memory",
+        "usage_refresh",
+        "competition",
+        "hierarchical",
+        "predictive",
+    }
     metadata = {
         "git_commit": git_commit(),
         "seed": getattr(config, "seed", None),
@@ -102,17 +141,20 @@ def build_run_metadata(config) -> Dict[str, Any]:
         if config.attention_impl in {"local", "csa"}
         else None,
         "csa_indexer_heads": csa.indexer_heads if config.attention_impl == "csa" else None,
-        "forgetting_local_window_size": config.forgetting.local_window_size
-        if config.attention_impl == "forgetting"
+        "memory_local_window_size": policy.local_window_size
+        if config.attention_impl in memory_impls
         else None,
-        "forgetting_memory_block_size": config.forgetting.memory_block_size
-        if config.attention_impl == "forgetting"
+        "memory_block_size": policy.block_size
+        if config.attention_impl in memory_impls
         else None,
-        "forgetting_memory_decay_rate": config.forgetting.memory_decay_rate
-        if config.attention_impl == "forgetting"
+        "memory_budget_blocks": policy.memory_budget_blocks
+        if config.attention_impl in memory_impls
         else None,
-        "forgetting_gate_floor": config.forgetting.gate_floor
-        if config.attention_impl == "forgetting"
+        "memory_age_decay_rate": policy.age_decay_rate
+        if config.attention_impl in memory_impls
+        else None,
+        "memory_gate_floor": policy.gate_floor
+        if config.attention_impl in memory_impls
         else None,
     }
     metadata.update(attention_budget(config))

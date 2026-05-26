@@ -1,0 +1,391 @@
+\documentclass[10pt]{article}
+
+\usepackage[margin=0.72in]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{microtype}
+\usepackage{graphicx}
+\usepackage{subcaption}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{tabularx}
+\usepackage[hidelinks]{hyperref}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{amsmath}
+\usepackage{dblfloatfix}
+\usepackage{float}
+\usepackage{setspace}
+
+\graphicspath{{../results/arch_compare_20260526/}}
+
+\setlength{\columnsep}{0.22in}
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.45em}
+\renewcommand{\arraystretch}{1.12}
+\setlist[itemize]{leftmargin=1.2em,itemsep=0.2em,topsep=0.25em}
+\makeatletter
+\setlength{\@fptop}{0pt}
+\setlength{\@fpbot}{0pt plus 1fil}
+\setlength{\@fpsep}{8pt}
+\makeatother
+
+\definecolor{PaperBlue}{HTML}{203A63}
+\definecolor{PaperOrange}{HTML}{F59E0B}
+\definecolor{PaperGray}{HTML}{5B6578}
+\definecolor{PaperLight}{HTML}{F8FAFC}
+
+\title{\vspace{-1.1em}\bfseries 10 Forgetting Attention Policies:\\\large Reference Implementations, Correctness Tests, and Scaling Behavior on an 18M-Class Transformer}
+\author{Vuk Rosic\\\small Independent Research Project}
+\date{May 26, 2026}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+We study whether simple forgetting and memory policies can improve
+causal attention when implemented as readable PyTorch reference modules.
+We compare dense attention against ten non-dense policies under a fixed
+one-GPU budget, sweeping context lengths from 2K to 8K on an 18M-class
+transformer. In this unfused setup, dense attention has the best loss
+and throughput. The strongest memory
+variants are the simplest ones: block-mean compression, age decay,
+hierarchical summaries, and surprise retention. This paper and code repository provides clearly defined and correctly
+implemented forgetting mechanisms and experiments ready for kernel writers or
+larger-scale follow-up experiments, as well as initial small-scale results.
+\end{abstract}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.82\textwidth]{mechanism_diagrams.png}
+\caption{Memory illustration for the mechanisms in this paper. Black
+regions are fully visible to the query, gray regions are retained
+through memory/gating, and white regions are outside the visible memory.}
+\label{fig:diagrams}
+\end{figure}
+
+\section{Literature Review}
+
+Long-context transformers usually change one of four things: which
+tokens may be attended to, how past state is stored, how old information
+is retrieved, or how sequence length is reduced before attention runs.
+Local and sparse-attention methods such as Longformer, BigBird,
+Reformer, and Routing Transformer reduce the number of keys each query
+compares against~\cite{longformer,bigbird,reformer,routing_transformer}.
+Memory systems such as Transformer-XL and Compressive Transformer carry
+state across segments or compress old states that would otherwise leave
+the window~\cite{transformer_xl,compressive_transformer}. Retrieval
+methods such as kNN-LM and Memorizing Transformers externalize some of
+that memory into a datastore~\cite{knn_lm,memorizing_transformers}.
+
+Modern large models also care about memory compression. DeepSeek-V2 and
+DeepSeek-V3 use Multi-head Latent Attention to reduce KV-cache cost at
+scale~\cite{deepseek_v2,deepseek_v3}. Our CSA baseline is a small
+reference point in that family: old context is still attention material,
+but it is represented more cheaply before attention reads it.
+Token-merging work such as ToMe motivates a different primitive:
+compress redundant content by merging, not only by masking or
+dropping~\cite{tome}.
+
+\section{Goal}
+
+\begin{itemize}
+\item Provide a reference implementation of ten forgetting-attention policies
+ready to scale up by kernel writers and follow-up experiments.
+\item Explain each idea clearly with math, code, and a diagram.
+\end{itemize}
+
+\section{Policies Compared}
+
+Each policy is an alternative per-layer attention module inside the same
+transformer block. Figure~\ref{fig:diagrams} shows what each mechanism's
+attention pattern looks like at the last query position.
+
+\begin{itemize}
+\item \textbf{dense} (classic baseline) --- full causal SDPA with GQA
+and RoPE.
+\item \textbf{local} --- sliding window of $W=64$, no memory. Included as
+the isolated baseline so the other policies (which all contain local
+attention plus added memory) can be measured against pure local: does
+the extra memory machinery add value, or is local doing most of the work?
+\item \textbf{compressed\_memory} --- block-mean compression, all blocks
+visible, no gate.
+\item \textbf{csa} --- lightning indexer scores compressed blocks; top
+$k=4$ kept per query (DeepSeek-style compressed sparse attention
+baseline).
+\item \textbf{age\_forgetting} --- linear age-decay gate: gate $=1-r\cdot
+\text{age}$ on compressed blocks.
+\item \textbf{hierarchical} --- two-level: blocks plus
+super-blocks-of-blocks, each level gated by $1/(\text{level}+1)$.
+\item \textbf{predictive} --- small MLP scores blocks per query from
+$(Q, K_b, \text{age})$; top-$k$ kept.
+\item \textbf{surprise\_retention} (new) --- per-block, query-independent
+score $s_b = \|V_b - f(K_b)\|^2$ where $f$ is a learned predictor;
+top-$k$ most-surprising blocks kept.
+\item \textbf{frequency\_lfu} (new) --- score is the causal cumulative
+sum of past attention mass on each block: blocks the model has actually
+used get retained.
+\item \textbf{token\_merge} (new) --- bipartite content-similarity merge
+on memory: every other block is paired with its neighbor, top-$r$
+most-similar pairs are merged, halving memory length.
+\item \textbf{recurrent\_state} (new) --- linear-attention with positive
+feature map $\phi$ and causal cumulative state
+$S_t = \sum_{s\leq t} \phi(K_s)\otimes V_s$.
+Memory is $O(d_k^2)$ per layer, independent of $T$.
+\end{itemize}
+
+\section{Correctness Suite}
+
+Each mechanism passes five CUDA tests before entering the sweep:
+shape/dtype, causality (future-position perturbations leave earlier
+outputs unchanged), mask correctness, gradient flow, and recorded peak
+memory. Current status: 55/55 green on one RTX 3090. Run via
+\verb|python -m tests.test_forgetting_mechanisms|.
+
+\section{Setup}
+
+\begin{table}[H]
+\centering
+\small
+\caption{Shared experimental setup for the scaling sweep.}
+\label{tab:setup}
+\begin{tabular}{@{}ll@{}}
+\toprule
+Item & Value \\
+\midrule
+Config preset & \texttt{CSAMinimumPaperConfig} \\
+Parameters & 18.35M--18.77M \\
+Hidden size & 256 \\
+Layers / heads & 8 / 8 \\
+KV heads (GQA) & 4 \\
+Context length sweep & \{2048, 4096, 8192\} \\
+Batch size (scaled) & 4 / 2 / 1 (constant tokens/step) \\
+Optimizer & Muon (matrix) + AdamW (other) \\
+Dataset & \texttt{processed\_data/speedrun\_40M} \\
+Hardware & 1$\times$NVIDIA RTX 3090, 24GB \\
+Budget per run & 300 active training seconds \\
+Eval cadence & every 200 steps \\
+Seeds & 1 (this run) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Fairness rule.} Only the per-layer attention module changes
+between rows; model, data, optimizer, seed, and hardware are identical.
+Batch size scales with context length so tokens-per-step is constant at
+8192, and each run is capped at 300 active training seconds.
+
+\textbf{Metrics.} Each run writes \texttt{metrics.json} with final
+validation loss, tokens seen, tok/s, active and wall time, peak
+allocated/reserved VRAM, and a per-eval loss history versus tokens and
+seconds.
+
+\section{Results}
+
+The full sweep completed: 33/33 runs finished successfully, with no OOMs
+or runtime failures. Table~\ref{tab:results} gives the complete grid.
+The pattern is consistent across context lengths. Dense attention is the
+best validation-loss baseline and also the fastest path in this
+reference implementation. Local attention is the strongest cheaper
+baseline. The compressed-memory family clusters behind local, and CSA
+and recurrent state are substantially worse under this short training
+budget. Within the forgetting family, simple rules are the strongest:
+age decay and ungated compressed memory are near the top at 2K and 4K,
+while surprise retention is the best compressed-memory variant at 8K.
+The learned predictive router and token-merge variant are weaker here,
+which suggests that extra selection machinery can lose to simpler
+memory rules when the implementation is unfused and the run is short.
+
+\begin{table}[H]
+\centering
+\scriptsize
+\caption{Completed 33-run sweep. Each row is one 300-second run on the
+same RTX 3090. Final loss is not the only fair view because faster
+mechanisms process more tokens inside the time cap.}
+\label{tab:results}
+\resizebox{\textwidth}{!}{\input{../results/forgetting_scaling_latest/results_table.tex}}
+\end{table}
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}[t]{0.49\textwidth}
+\centering
+\includegraphics[width=\linewidth]{../results/forgetting_scaling_latest/loss_vs_tokens.png}
+\caption{Validation loss vs tokens seen. This is the fairest curve because
+the sweep is time-capped.}
+\label{fig:val-loss}
+\end{subfigure}
+\hfill
+\begin{subfigure}[t]{0.49\textwidth}
+\centering
+\includegraphics[width=\linewidth]{../results/forgetting_scaling_latest/loss_vs_time.png}
+\caption{Validation loss vs active training seconds.}
+\label{fig:tokens}
+\end{subfigure}
+\caption{Token-normalized and time-normalized views of the completed
+sweep. Dense and local dominate the reference implementations in this
+budget regime.}
+\label{fig:main}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\begin{subfigure}[t]{0.49\textwidth}
+\centering
+\includegraphics[width=\linewidth]{../results/forgetting_scaling_latest/final_loss_vs_context.png}
+\caption{Final validation loss by context length.}
+\label{fig:final-loss-context}
+\end{subfigure}
+\hfill
+\begin{subfigure}[t]{0.49\textwidth}
+\centering
+\includegraphics[width=\linewidth]{../results/forgetting_scaling_latest/throughput_by_context.png}
+\caption{Throughput by context length.}
+\label{fig:throughput-context}
+\end{subfigure}
+\caption{Cost side of the comparison. Longer contexts reduce throughput,
+so time-capped loss must be read together with tokens processed and wall
+time.}
+\label{fig:cost-side}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.78\textwidth]{../results/forgetting_scaling_latest/vram_by_context.png}
+\caption{Peak reserved VRAM by context length. This is what tells us
+which mechanisms are likely to fit future kernels or multi-GPU scaling
+work.}
+\label{fig:vram-context}
+\end{figure}
+
+\textbf{Takeaway.} The reference implementations do not show a quality
+win for the forgetting policies. Their value at this stage is
+diagnostic: the tested memory rules are correct and runnable, but the
+unfused compressed-memory path is too slow and too weak to beat the
+simple local baseline. A useful next paper should either improve the
+memory rule enough to beat local in loss-vs-tokens, or write a fused
+kernel and rerun this exact sweep.
+
+\section{Usefulness for Big Lab Researchers}
+
+The codebase is reference material for kernel and scaling work. Each
+policy is a plain-PyTorch module with math in the docstrings, paired
+with a passing causal correctness test. A kernel writer can port a
+policy to Triton or CUDA, A/B it against the reference for exactness,
+keep the same \texttt{metrics.json} schema, and rerun this sweep on
+larger GPUs. The training script is single-GPU first but the layout,
+config, checkpoints, and metrics files adapt directly to
+\texttt{torchrun}, DDP, or an internal harness.
+
+\section{Honest Limits}
+
+One seed, one 3090, one dataset, one parameter scale, unfused kernels.
+The numbers describe how each mechanism plateaus on this exact setup.
+The task is ordinary next-token prediction, which may not put enough
+pressure on the memory system to reveal when old information is useful.
+A fused-kernel rerun or a long-memory retrieval task could change the
+ranking.
+
+\section{Output Artifacts}
+
+The four newest mechanisms live in \path{models/new_forgetting.py}, the
+correctness suite in \path{tests/test_forgetting_mechanisms.py}, and the
+scaling sweep in \path{experiments/forgetting_scaling_sweep.py}.
+
+\section{Conclusion}
+
+The sweep turns ten memory ideas into runnable, causal PyTorch modules
+with passing correctness tests and a complete equal-time scaling table.
+Dense and local lead on this 18M reference run; among the memory family,
+age decay, ungated compressed memory, and surprise retention are the
+strongest candidates to fuse and rerun.
+
+\section{Next Steps}
+
+\begin{itemize}
+\item Repeat the sweep with three seeds for dense, local, age\_forgetting,
+surprise\_retention, and compressed\_memory.
+\item Write one fused kernel for the most promising compressed-memory
+path and compare it against the plain-PyTorch reference for exactness.
+\item Add a synthetic key-value retrieval task where the answer depends
+on old tokens. For example, place \texttt{key -> value} pairs thousands
+of tokens before a query and measure whether each mechanism retrieves
+the right value. This tests memory usefulness directly instead of only
+through language-model loss.
+\item If a mechanism beats local on loss-vs-tokens, graft that rule into
+the CSA lightning-indexer path and rerun the same table.
+\end{itemize}
+
+\begingroup
+\small
+\setstretch{0.92}
+\setlength{\itemsep}{0pt}
+\begin{thebibliography}{13}
+\bibitem{deepseek_v2}
+DeepSeek-AI.
+\newblock {\em DeepSeek-V2: A Strong, Economical, and Efficient Mixture-of-Experts Language Model}.
+\newblock 2024.
+
+\bibitem{deepseek_v3}
+DeepSeek-AI.
+\newblock {\em DeepSeek-V3 Technical Report}.
+\newblock 2024.
+
+\bibitem{csaminipaper}
+V.~Rosic.
+\newblock {\em Can Compressed Sparse Attention Help Under Equal GPU Time?}
+\newblock Internal research report, May 24, 2026.
+
+\bibitem{transformer_xl}
+Z.~Dai, Z.~Yang, Y.~Yang, J.~Carbonell, Q.~Le, and R.~Salakhutdinov.
+\newblock {\em Transformer-XL: Attentive Language Models Beyond a Fixed-Length Context}.
+\newblock ACL 2019.
+
+\bibitem{compressive_transformer}
+J.~W. Rae, A.~Potapenko, S.~J. Kayumov, and T.~P. Lillicrap.
+\newblock {\em Compressive Transformers for Long-Range Sequence Modelling}.
+\newblock ICLR 2020.
+
+\bibitem{longformer}
+I.~Beltagy, M.~E. Peters, and A.~Cohan.
+\newblock {\em Longformer: The Long-Document Transformer}.
+\newblock arXiv:2004.05150, 2020.
+
+\bibitem{bigbird}
+M.~Zaheer et al.
+\newblock {\em Big Bird: Transformers for Longer Sequences}.
+\newblock NeurIPS 2020.
+
+\bibitem{reformer}
+N.~Kitaev, L.~Kaiser, and A.~Levskaya.
+\newblock {\em Reformer: The Efficient Transformer}.
+\newblock ICLR 2020.
+
+\bibitem{routing_transformer}
+A.~Roy, M.~Saffar, A.~Vaswani, and D.~Grangier.
+\newblock {\em Efficient Content-Based Sparse Attention with Routing Transformers}.
+\newblock TACL 2021.
+
+\bibitem{memorizing_transformers}
+Y.~Wu, M.~N. Rabe, D.~Hutchins, and C.~Szegedy.
+\newblock {\em Memorizing Transformers}.
+\newblock ICLR 2022.
+
+\bibitem{knn_lm}
+U.~Khandelwal, O.~Levy, D.~Jurafsky, L.~Zettlemoyer, and M.~Lewis.
+\newblock {\em Generalization through Memorization: Nearest Neighbor Language Models}.
+\newblock ICLR 2020.
+
+\bibitem{tome}
+D.~Bolya, C.-Y.~Fu, X.~Dai, P.~Zhang, C.~Feichtenhofer, J.~Hoffman.
+\newblock {\em Token Merging: Your ViT But Faster}.
+\newblock ICLR 2023.
+
+\bibitem{linear_attn}
+A.~Katharopoulos, A.~Vyas, N.~Pappas, F.~Fleuret.
+\newblock {\em Transformers are RNNs: Fast Autoregressive Transformers with Linear Attention}.
+\newblock ICML 2020.
+\end{thebibliography}
+\endgroup
+
+\end{document}

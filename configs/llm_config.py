@@ -19,7 +19,14 @@ class LLMConfig:
     # Attention implementation
     # "dense" keeps the original baseline. "local" keeps only a sliding window.
     # "csa" enables local attention plus compressed old memory.
+    # "compressed_memory" keeps local attention plus ungated compressed memory.
     # "forgetting" / "age_forgetting" keeps local attention plus gated compressed memory.
+    # "age_forgetting_exponential", "age_forgetting_sigmoid",
+    # "age_forgetting_cosine", "age_forgetting_reciprocal", and
+    # "age_forgetting_hard_cutoff" are extra gate variants on the same base.
+    # "random_keyframe", "periodic_keyframe", "learned_router", and
+    # "salience_memory" are structurally different routing mechanisms over the
+    # same local+memory base.
     # "usage_refresh", "competition", "hierarchical", and "predictive" are
     # alternate memory philosophies that share the same local+compressed base.
     attention_impl: str = "dense"
@@ -67,7 +74,36 @@ class LLMConfig:
     def __post_init__(self):
         self.d_k = self.d_model // self.n_heads
         assert self.d_model % self.n_heads == 0, "d_model must be divisible by n_heads"
-        assert self.attention_impl in {"dense", "local", "csa", "forgetting", "age_forgetting", "usage_refresh", "competition", "hierarchical", "predictive"}, "attention_impl must be a supported attention policy"
+        assert self.attention_impl in {
+            "dense",
+            "local",
+            "csa",
+            "compressed_memory",
+            "forgetting",
+            "age_forgetting",
+            "age_forgetting_exponential",
+            "age_forgetting_sigmoid",
+            "age_forgetting_cosine",
+            "age_forgetting_reciprocal",
+            "age_forgetting_hard_cutoff",
+            "random_keyframe",
+            "periodic_keyframe",
+            "learned_router",
+            "salience_memory",
+            "usage_refresh",
+            "competition",
+            "hierarchical",
+            "predictive",
+            "surprise_retention",
+            "frequency_lfu",
+            "token_merge",
+            "recurrent_state",
+            "entropy_gated_csa",
+            "cross_block_residual",
+            "negative_memory",
+            "hebbian_co_activation",
+            "multi_res_compression",
+        }, "attention_impl must be a supported attention policy"
         self.csa.__post_init__()
         self.forgetting.__post_init__()
         self.memory_policy.__post_init__()

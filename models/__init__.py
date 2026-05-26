@@ -13,10 +13,30 @@ from .compressed_sparse_attention import (
 from .forgetting_attention import ForgettingAttention
 from .memory_policies import (
     AgeForgettingAttention,
+    AgeForgettingCosineAttention,
+    AgeForgettingExponentialAttention,
+    AgeForgettingHardCutoffAttention,
+    AgeForgettingReciprocalAttention,
+    AgeForgettingSigmoidAttention,
+    CompressedMemoryNoGateAttention,
     CompetitionMemoryAttention,
     HierarchicalSummarizationAttention,
+    LearnedRouterAttention,
+    PeriodicKeyframeAttention,
+    RandomKeyframeAttention,
     PredictiveImportanceAttention,
+    SalienceMemoryAttention,
     UsageRefreshAttention,
+)
+from .novel_attention import (
+    EntropyGatedCSA,
+    EntropyGatedTokenCompressor,
+    HebbianCoActivationAttention,
+    GradientRetentionWrapper,
+    CrossBlockResidualAttention,
+    NegativeMemoryAttention,
+    LayerDecayAttention,
+    MultiResolutionCompressionAttention,
 )
 
 __all__ = [
@@ -27,6 +47,16 @@ __all__ = [
     "CompressedSparseAttention",
     "ForgettingAttention",
     "AgeForgettingAttention",
+    "AgeForgettingExponentialAttention",
+    "AgeForgettingSigmoidAttention",
+    "AgeForgettingCosineAttention",
+    "AgeForgettingReciprocalAttention",
+    "AgeForgettingHardCutoffAttention",
+    "RandomKeyframeAttention",
+    "PeriodicKeyframeAttention",
+    "LearnedRouterAttention",
+    "SalienceMemoryAttention",
+    "CompressedMemoryNoGateAttention",
     "UsageRefreshAttention",
     "CompetitionMemoryAttention",
     "HierarchicalSummarizationAttention",
@@ -34,4 +64,13 @@ __all__ = [
     "GroupedOutputProjection",
     "LightningIndexer",
     "TokenCompressor",
+    # New mechanisms
+    "EntropyGatedCSA",
+    "EntropyGatedTokenCompressor",
+    "HebbianCoActivationAttention",
+    "GradientRetentionWrapper",
+    "CrossBlockResidualAttention",
+    "NegativeMemoryAttention",
+    "LayerDecayAttention",
+    "MultiResolutionCompressionAttention",
 ]

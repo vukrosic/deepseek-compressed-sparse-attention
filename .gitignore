@@ -7,6 +7,7 @@ __pycache__/
 *.so
 
 **/.DS_Store
+._*
 
 # Distribution / packaging
 .Python
@@ -255,6 +256,10 @@ plots/val_loss_*.png
 !docs/research/results/**/*.json
 !docs/research/results/**/*.log
 !docs/timecapsule/**/*
+
+# Keep paper-facing result bundles, not raw nested experiment dumps/logs.
+docs/research/results/**/raw_runs/
+docs/research/results/**/*.log
 
 # gemini-cli settings
 .gemini/

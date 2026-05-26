@@ -7,7 +7,6 @@ import math
 import subprocess
 import sys
 import time
-from collections import defaultdict
 from pathlib import Path
 from statistics import mean
 
@@ -28,6 +27,16 @@ CONDITIONS = {
     "dense": "dense",
     "csa": "csa",
     "age_forgetting": "age_forgetting",
+    "age_forgetting_exponential": "age_forgetting_exponential",
+    "age_forgetting_sigmoid": "age_forgetting_sigmoid",
+    "age_forgetting_cosine": "age_forgetting_cosine",
+    "age_forgetting_reciprocal": "age_forgetting_reciprocal",
+    "age_forgetting_hard_cutoff": "age_forgetting_hard_cutoff",
+    "random_keyframe": "random_keyframe",
+    "periodic_keyframe": "periodic_keyframe",
+    "learned_router": "learned_router",
+    "salience_memory": "salience_memory",
+    "compressed_memory": "compressed_memory",
     "usage_refresh": "usage_refresh",
     "competition": "competition",
     "hierarchical": "hierarchical",
@@ -54,6 +63,10 @@ SUMMARY_FIELDS = [
     "attention_vector_budget",
     "raw_token_equivalent_coverage",
     "probe_mean_gate",
+    "probe_mean_random_score",
+    "probe_mean_periodic_score",
+    "probe_mean_route_score",
+    "probe_mean_salience_score",
     "probe_mean_refresh",
     "probe_mean_utility",
     "probe_mean_predictive_score",
@@ -62,9 +75,6 @@ SUMMARY_FIELDS = [
     "metrics_path",
     "stdout_path",
 ]
-
-CURVE_FIELDS = ["condition", "seed", "age_gate_curve"]
-
 
 def condition_sort_key(condition: str) -> int:
     try:
@@ -145,6 +155,12 @@ def build_command(args, attention_impl: str, output_dir: Path, seed: int) -> lis
         command.extend(["--memory_gate_floor", str(args.memory_gate_floor)])
     if args.memory_competition_capacity is not None:
         command.extend(["--memory_competition_capacity", str(args.memory_competition_capacity)])
+    if args.memory_periodic_stride is not None:
+        command.extend(["--memory_periodic_stride", str(args.memory_periodic_stride)])
+    if args.memory_router_hidden_dim is not None:
+        command.extend(["--memory_router_hidden_dim", str(args.memory_router_hidden_dim)])
+    if args.memory_router_top_k is not None:
+        command.extend(["--memory_router_top_k", str(args.memory_router_top_k)])
     if args.memory_hierarchy_levels is not None:
         command.extend(["--memory_hierarchy_levels", str(args.memory_hierarchy_levels)])
     if args.memory_hierarchy_branching is not None:
@@ -244,6 +260,10 @@ def probe_run(output_dir: Path, args, device: torch.device) -> dict:
 
     probe = {
         "probe_mean_gate": attention_debug.get("mean_gate"),
+        "probe_mean_random_score": attention_debug.get("mean_random_score"),
+        "probe_mean_periodic_score": attention_debug.get("mean_periodic_score"),
+        "probe_mean_route_score": attention_debug.get("mean_route_score"),
+        "probe_mean_salience_score": attention_debug.get("mean_salience_score"),
         "probe_mean_refresh": attention_debug.get("mean_refresh"),
         "probe_mean_utility": attention_debug.get("mean_utility"),
         "probe_mean_predictive_score": attention_debug.get("mean_predictive_score"),
@@ -323,6 +343,26 @@ def numeric_values(rows: list[dict], key: str) -> list[float]:
     return values
 
 
+def load_loss_curve(metrics: dict) -> tuple[list[float], list[float]]:
+    history = metrics.get("history", {}) or {}
+    steps = history.get("steps", []) or []
+    val_losses = history.get("val_losses", []) or []
+    tokens_seen = history.get("tokens_seen", []) or []
+
+    if len(steps) != len(val_losses):
+        return [], []
+
+    if len(tokens_seen) == len(val_losses):
+        return [float(token) for token in tokens_seen], [float(loss) for loss in val_losses]
+
+    config = metrics.get("experiment_config", {}) or {}
+    batch_size = int(config.get("batch_size", 1) or 1)
+    max_seq_len = int(config.get("max_seq_len", 1) or 1)
+    tokens_per_step = batch_size * max_seq_len
+    inferred_tokens = [float(step) * tokens_per_step for step in steps]
+    return inferred_tokens, [float(loss) for loss in val_losses]
+
+
 def build_aggregate(rows: list[dict]) -> list[dict]:
     aggregate = []
     for condition in sorted({row["condition"] for row in rows}, key=condition_sort_key):
@@ -342,6 +382,10 @@ def build_aggregate(rows: list[dict]) -> list[dict]:
         peak_alloc = numeric_values(condition_rows, "peak_cuda_memory_allocated_gib")
         peak_reserved = numeric_values(condition_rows, "peak_cuda_memory_reserved_gib")
         probe_gate = numeric_values(condition_rows, "probe_mean_gate")
+        probe_random = numeric_values(condition_rows, "probe_mean_random_score")
+        probe_periodic = numeric_values(condition_rows, "probe_mean_periodic_score")
+        probe_route = numeric_values(condition_rows, "probe_mean_route_score")
+        probe_salience = numeric_values(condition_rows, "probe_mean_salience_score")
         probe_refresh = numeric_values(condition_rows, "probe_mean_refresh")
         probe_utility = numeric_values(condition_rows, "probe_mean_utility")
         probe_predictive = numeric_values(condition_rows, "probe_mean_predictive_score")
@@ -365,6 +409,10 @@ def build_aggregate(rows: list[dict]) -> list[dict]:
                 "attention_vector_budget": condition_rows[0].get("attention_vector_budget"),
                 "raw_token_equivalent_coverage": condition_rows[0].get("raw_token_equivalent_coverage"),
                 "probe_mean_gate": mean(probe_gate) if probe_gate else None,
+                "probe_mean_random_score": mean(probe_random) if probe_random else None,
+                "probe_mean_periodic_score": mean(probe_periodic) if probe_periodic else None,
+                "probe_mean_route_score": mean(probe_route) if probe_route else None,
+                "probe_mean_salience_score": mean(probe_salience) if probe_salience else None,
                 "probe_mean_refresh": mean(probe_refresh) if probe_refresh else None,
                 "probe_mean_utility": mean(probe_utility) if probe_utility else None,
                 "probe_mean_predictive_score": mean(probe_predictive) if probe_predictive else None,
@@ -409,7 +457,128 @@ def write_markdown_table(root: Path, aggregate: list[dict]) -> None:
     table_path.write_text("\n".join(lines) + "\n")
 
 
-def write_plots(root: Path, aggregate: list[dict], probe_rows: list[dict]) -> None:
+def write_loss_curve_plot(root: Path, rows: list[dict], aggregate: list[dict]) -> None:
+    if not rows:
+        return
+
+    try:
+        import matplotlib.pyplot as plt
+    except Exception as exc:
+        (root / "plot_error.txt").write_text(f"Could not import matplotlib for loss curve plot: {exc}\n")
+        return
+
+    palette = {
+        "dense": "#2F4858",
+        "csa": "#395B7F",
+        "age_forgetting": "#F6AE2D",
+        "usage_refresh": "#7A3E65",
+        "competition": "#3E6A5A",
+        "hierarchical": "#5B4E8C",
+        "predictive": "#B65D32",
+    }
+
+    dense_losses = None
+    dense_tokens = None
+    for row in rows:
+        if row.get("condition") != "dense":
+            continue
+        metrics = read_metrics(Path(row["metrics_path"]))
+        dense_tokens, dense_losses = load_loss_curve(metrics)
+        if dense_tokens and dense_losses:
+            break
+
+    fig, ax = plt.subplots(figsize=(9.4, 5.8))
+    final_losses = {}
+
+    for row in sorted(rows, key=lambda item: condition_sort_key(item["condition"])):
+        metrics = read_metrics(Path(row["metrics_path"]))
+        tokens, losses = load_loss_curve(metrics)
+        if not tokens or not losses:
+            continue
+        condition = row["condition"]
+        final_losses[condition] = losses[-1]
+        ax.plot(
+            tokens,
+            losses,
+            marker="o",
+            linewidth=2.0,
+            markersize=4.5,
+            label=condition,
+            color=palette.get(condition, "#444444"),
+        )
+
+    if dense_tokens and dense_losses:
+        ax.plot(
+            dense_tokens,
+            dense_losses,
+            color=palette["dense"],
+            linewidth=2.8,
+            alpha=0.15,
+        )
+
+    ax.set_title("Validation loss versus training tokens")
+    ax.set_xlabel("Training tokens seen")
+    ax.set_ylabel("Validation loss")
+    ax.grid(alpha=0.22)
+    ax.legend(ncol=2, fontsize=8, frameon=False)
+
+    if final_losses:
+        spread = max(final_losses.values()) - min(final_losses.values())
+        if dense_losses:
+            ax.text(
+                0.02,
+                0.02,
+                f"Final spread: {spread:.4f} loss\nRule of thumb here: < 0.01 is noise",
+                transform=ax.transAxes,
+                ha="left",
+                va="bottom",
+                fontsize=9,
+                bbox=dict(boxstyle="round,pad=0.35", facecolor="white", edgecolor="#D1D5DB", alpha=0.92),
+            )
+
+    fig.tight_layout()
+    fig.savefig(root / "loss_vs_tokens_by_policy.png", dpi=200, bbox_inches="tight")
+    fig.savefig(root / "loss_vs_tokens_by_policy.svg", bbox_inches="tight")
+    plt.close(fig)
+
+
+def write_noise_note(root: Path, aggregate: list[dict]) -> None:
+    if not aggregate:
+        return
+
+    losses = [row["val_loss_mean"] for row in aggregate if row.get("val_loss_mean") is not None]
+    if not losses:
+        return
+
+    best_row = min(
+        (row for row in aggregate if row.get("val_loss_mean") is not None),
+        key=lambda row: row["val_loss_mean"],
+    )
+    dense_row = next((row for row in aggregate if row["condition"] == "dense"), None)
+    spread = max(losses) - min(losses)
+
+    lines = [
+        "# Noise rule for this Mac smoke run",
+        "",
+        f"Final validation-loss spread across policies: {spread:.4f}.",
+        "",
+        "Use this as a practical threshold for this exact smoke setup:",
+        "",
+        "- below about `0.01` loss difference: treat as noise unless it repeats across seeds or token budgets",
+        "- around `0.01` to `0.03`: interesting, but not enough for a strong claim",
+        "- above `0.03`: start taking the separation seriously",
+        "",
+        f"Best observed final loss: `{best_row['condition']}` at `{best_row['val_loss_mean']:.4f}`.",
+    ]
+    if dense_row is not None and dense_row.get("val_loss_mean") is not None:
+        lines.append(f"Dense final loss: `{dense_row['val_loss_mean']:.4f}`.")
+    lines.append("")
+    lines.append("This note is for the 20k-token Mac pilot scale, not for the final NVIDIA scaling run.")
+
+    (root / "noise_rule.md").write_text("\n".join(lines) + "\n")
+
+
+def write_plots(root: Path, aggregate: list[dict], probe_rows: list[dict], rows: list[dict]) -> None:
     if not aggregate:
         return
 
@@ -584,6 +753,7 @@ def write_plots(root: Path, aggregate: list[dict], probe_rows: list[dict]) -> No
     save_bar("attention_vector_budget", "Attention-vector budget by policy", "Vector budget", "attention_budget_by_policy.png")
     save_policy_comparison_summary()
     save_mechanism_overview()
+    write_loss_curve_plot(root, rows, aggregate)
 
     fig, axes = plt.subplots(2, 2, figsize=(12, 8))
     axes = axes.flatten()
@@ -637,7 +807,8 @@ def write_summary(root: Path, rows: list[dict], probe_rows: list[dict]) -> list[
         json.dump(probe_rows, f, indent=2)
 
     write_markdown_table(root, aggregate)
-    write_plots(root, aggregate, probe_rows)
+    write_plots(root, aggregate, probe_rows, rows)
+    write_noise_note(root, aggregate)
     return aggregate
 
 
@@ -676,7 +847,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Run dense, CSA, and five memory-policy research sweeps.")
     parser.add_argument("--repo_root", default=".", help="Repository root")
     parser.add_argument("--run_root", default="runs/memory_policy", help="Output root")
-    parser.add_argument("--conditions", default="dense,csa,age_forgetting,usage_refresh,competition,hierarchical,predictive", help="Comma-separated conditions to run")
+    parser.add_argument(
+        "--conditions",
+        default="dense,csa,age_forgetting,age_forgetting_exponential,age_forgetting_sigmoid,age_forgetting_cosine,age_forgetting_reciprocal,age_forgetting_hard_cutoff,random_keyframe,periodic_keyframe,learned_router,salience_memory,compressed_memory,usage_refresh,competition,hierarchical,predictive",
+        help="Comma-separated conditions to run",
+    )
     parser.add_argument("--seeds", default="42", help="Comma-separated seeds")
     parser.add_argument("--train_tokens", type=int, default=5_000_000)
     parser.add_argument("--max_train_seconds", type=float)
@@ -701,6 +876,9 @@ def main() -> None:
     parser.add_argument("--memory_refresh_strength", type=float, default=0.35)
     parser.add_argument("--memory_gate_floor", type=float, default=0.0)
     parser.add_argument("--memory_competition_capacity", type=int, default=8)
+    parser.add_argument("--memory_periodic_stride", type=int, default=4)
+    parser.add_argument("--memory_router_hidden_dim", type=int, default=64)
+    parser.add_argument("--memory_router_top_k", type=int, default=8)
     parser.add_argument("--memory_hierarchy_levels", type=int, default=2)
     parser.add_argument("--memory_hierarchy_branching", type=int, default=4)
     parser.add_argument("--memory_predictive_hidden_dim", type=int, default=32)

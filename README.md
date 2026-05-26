@@ -1,103 +1,177 @@
-# LLM Research Kit
+# Attention Forgetting Lab
 
-A high-performance codebase for LLM research, pretraining, and optimization: testing new architectures, optimizers, or training.
+Plain PyTorch reference implementations for forgetting and memory attention policies.
 
-- Modular transformer with GQA, RoPE, and RMSNorm
-- Muon optimizer alongside AdamW
-- Training script, flexible configuration
-- Blog article: [Build DeepSeek V4's Compressed Sparse Attention](docs/tutorial.md)
-- Paper PDF: [papers/DeepSeek_V4.pdf](papers/DeepSeek_V4.pdf)
-- CSA mini-paper plan: [docs/research/csa_top_k_tradeoff_mini_paper.md](docs/research/csa_top_k_tradeoff_mini_paper.md)
-- CSA mini-paper critique: [docs/research/csa_top_k_tradeoff_critique.md](docs/research/csa_top_k_tradeoff_critique.md)
-- CSA saved results: [docs/research/results/csa_top_k_20260524/README.md](docs/research/results/csa_top_k_20260524/README.md)
-- CSA pilot report PDF: [docs/research/reports/csa_pilot_report_20260524.pdf](docs/research/reports/csa_pilot_report_20260524.pdf)
-- CSA mini paper LaTeX: [docs/research/reports/csa_mini_paper_20260524.tex](docs/research/reports/csa_mini_paper_20260524.tex)
-- CSA mini paper PDF: [docs/research/reports/csa_mini_paper_20260524.pdf](docs/research/reports/csa_mini_paper_20260524.pdf)
-- Simple compressed-memory experiment: [docs/research/compressed_memory_simple_experiment.md](docs/research/compressed_memory_simple_experiment.md)
-- Three-way attention policy experiment: [experiments/attention_policy_experiment.py](experiments/attention_policy_experiment.py)
-- GPU runbook: [docs/research/gpu_runbook.md](docs/research/gpu_runbook.md)
+This repository is a small research lab for asking:
 
-- `models/`: Transformer layers and components (RoPE, RMSNorm, Multi-Head Attention).
-- `optimizers/`: Muon optimizer (outperforms AdamW and all others).
-- `training/`: Core trainer logic and utilities.
-- `configs/`: Hyperparameter and dataset configurations.
-- `utils/`: Logging, plotting, and helper functions.
+```text
+If a transformer cannot attend to everything forever, what should it keep?
+```
 
-## 🚀 Getting Started
+It includes ten non-dense attention policies, a dense baseline, correctness tests, a reproducible GPU sweep, and a short paper with the first results.
 
-#### Install Dependencies
+## Paper
+
+- PDF: [docs/research/reports/arch_compare_20260526.pdf](docs/research/reports/arch_compare_20260526.pdf)
+- LaTeX: [docs/research/reports/arch_compare_20260526.tex](docs/research/reports/arch_compare_20260526.tex)
+- Final plots/table: [docs/research/results/forgetting_scaling_latest](docs/research/results/forgetting_scaling_latest)
+
+Main result from the one-GPU reference sweep:
+
+```text
+dense and local attention dominate in unfused PyTorch.
+simple compressed-memory rules are the strongest memory variants.
+the current value is reference correctness, not a speed/quality win.
+```
+
+That is still useful: these modules are readable baselines for researchers who want to write Triton/CUDA kernels or scale the comparison on larger hardware.
+
+## Attention Policies
+
+Dense attention is the ceiling baseline. The ten non-dense policies are:
+
+| Policy | Idea |
+|---|---|
+| `local` | Hard recency forgetting: keep only the recent sliding window. |
+| `csa` | DeepSeek-style compressed sparse attention with a lightweight indexer. |
+| `compressed_memory` | Keep recent tokens plus block-mean summaries of older tokens. |
+| `age_forgetting` | Weaken older compressed blocks with an age-decay gate. |
+| `hierarchical` | Store blocks plus summaries of summaries. |
+| `predictive` | Use a small learned router to predict which blocks matter. |
+| `surprise_retention` | Keep blocks that are hard to predict from their own keys. |
+| `frequency_lfu` | Keep blocks that received more past attention mass. |
+| `token_merge` | Merge similar adjacent memory blocks. |
+| `recurrent_state` | Replace block memory with a fixed-size recurrent state. |
+
+## Repository Map
+
+```text
+models/
+  layers.py                    attention dispatch
+  memory_policies.py           compressed-memory policies
+  new_forgetting.py            surprise, LFU, token merge, recurrent state
+
+configs/
+  research_configs.py          small paper model config
+  memory_policy_config.py      memory-policy knobs
+
+experiments/
+  forgetting_scaling_sweep.py  resilient 11-policy x context sweep
+  forgetting_scaling_plot.py   rebuilds paper plots and results table
+
+tests/
+  test_forgetting_mechanisms.py  shape, causality, mask, gradients, memory smoke tests
+
+docs/research/
+  reports/                     paper PDF and LaTeX
+  results/forgetting_scaling_latest/
+                               final paper figures and table
+```
+
+## Install
+
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### Step 2: Download the Dataset
+For CUDA runs, install a PyTorch build matching your GPU environment before running the sweep.
 
-### Option A: 1B tokens
+## Data
+
+The paper sweep used a 40M-token speedrun slice:
+
 ```bash
-python3 -c "
+python3 - <<'PY'
 from datasets import load_dataset
-import os
-print('Downloading 1B Pretraining Data...')
-ds = load_dataset('vukrosic/blueberry-1B-pretrain')
-os.makedirs('processed_data/pretrain_1B', exist_ok=True)
-ds.save_to_disk('processed_data/pretrain_1B')
-print('✅ Full Data Ready!')
-"
+from pathlib import Path
+
+out = Path("processed_data/speedrun_40M")
+out.mkdir(parents=True, exist_ok=True)
+ds = load_dataset("vukrosic/blueberry-1B-pretrain", split="train[:20000]")
+ds.save_to_disk(str(out))
+print(f"saved {out}")
+PY
 ```
 
-### Option B: 2B tokens
+`processed_data/` is ignored by Git.
+
+## Run Tests
+
 ```bash
-python3 -c "
-from datasets import load_dataset
-import os
-print('Downloading 2B Pretraining Data...')
-ds = load_dataset('vukrosic/blueberry-2B-pretrain')
-os.makedirs('processed_data/pretrain_2B', exist_ok=True)
-ds.save_to_disk('processed_data/pretrain_2B')
-print('✅ Full Data Ready!')
-"
+bash scripts/run_tests.sh
 ```
 
-### Option C: Quick Start (40M Tokens)
+The main correctness grid is:
+
 ```bash
-python3 -c "
-from datasets import load_dataset
-import os
-print('Downloading 40M Token Subset...')
-ds = load_dataset('vukrosic/blueberry-1B-pretrain', split='train[:20000]')
-os.makedirs('processed_data/speedrun_40M', exist_ok=True)
-ds.save_to_disk('processed_data/speedrun_40M')
-print('✅ Speedrun Data Ready!')
-"
+python -m tests.test_forgetting_mechanisms
 ```
 
-## 🧠 LLM Architecture
+It checks shape/dtype, causality, mask/finite output, gradient flow, and memory-budget smoke behavior.
 
-Default is an **88M parameter** transformer LLM, you can modify configs.
+## Run A Tiny Sweep
 
-- **Layers**: 22 Transformer blocks.
-- **Hidden Dimension (`d_model`)**: 512.
-- **Feed-Forward Dimension (`d_ff`)**: 2048.
-- **Attention System**:
-  - 8 Query heads, 4 Key-Value heads (**Grouped Query Attention**).
-  - Rotary Positional Embeddings (**RoPE**).
-  - Fused QKVO projection for optimized compute.
-  - QK-Normalization for training stability.
-- **Research lanes**:
-  - Dense attention baseline.
-  - CSA compressed sparse attention.
-- Forgetting attention with gated compressed memory.
+Use this to catch bugs before renting a GPU:
 
-To launch the small three-way research sweep on the MacBook or CUDA:
 ```bash
-python experiments/attention_policy_experiment.py
+bash scripts/run_small_sweep.sh
 ```
-- **Normalization**: Pre-norm **RMSNorm**.
-- **Activation**: **Squared ReLU** (Primer-style).
-- **Vocab Size**: 49,152.
-- **Sequence Length**: 2048 tokens.
 
-### Optimization Highlights
-- **Weight Tying**: Shared weights between token embeddings and the LM head.
-- **Muon Support**: Architecture optimized for the Muon optimizer's orthogonal updates.
-- **Efficiency**: Designed for `torch.compile` compatibility and mixed-precision (BF16) training.
+It runs a short context-512 sweep over a few policies and writes under `runs/`.
+
+## Reproduce The GPU Sweep
+
+On a CUDA machine:
+
+```bash
+bash scripts/run_gpu_sweep.sh
+```
+
+This launches:
+
+```text
+11 policies x 3 context lengths x 300 seconds
+```
+
+Outputs go to:
+
+```text
+runs/forgetting_scaling/<timestamp>/
+```
+
+To regenerate paper plots from a completed run:
+
+```bash
+python experiments/forgetting_scaling_plot.py \
+  runs/forgetting_scaling/<timestamp> \
+  --out docs/research/results/forgetting_scaling_latest
+```
+
+Then rebuild the paper:
+
+```bash
+cd docs/research/reports
+pdflatex -interaction=nonstopmode -halt-on-error arch_compare_20260526.tex
+pdflatex -interaction=nonstopmode -halt-on-error arch_compare_20260526.tex
+```
+
+## Known Limits
+
+- one seed
+- one dataset
+- small 18M-class model
+- short 300-second runs
+- unfused PyTorch kernels
+- ordinary next-token prediction, not an explicit long-memory retrieval task
+
+The next useful experiment is a synthetic key-value retrieval benchmark where a query must recover values from thousands of tokens earlier.
+
+## DeepSeek V4 Tutorial Material
+
+This repo started as a DeepSeek compressed sparse attention tutorial. Those materials are still here:
+
+- Tutorial: [docs/tutorial.md](docs/tutorial.md)
+- Paper PDF: [papers/DeepSeek_V4.pdf](papers/DeepSeek_V4.pdf)
+

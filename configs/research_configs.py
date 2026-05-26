@@ -137,3 +137,27 @@ class MemoryFiveMillionConfig(LLMConfig):
             gate_floor=0.0,
         )
     )
+
+
+@dataclass
+class MemoryFiveMillionLongContextConfig(LLMConfig):
+    """Compact ~5M-parameter config for the real-data dense continuation run."""
+
+    d_model: int = 256
+    n_heads: int = 8
+    n_kv_heads: int = 4
+    n_layers: int = 6
+    d_ff: int = 1024
+    max_seq_len: int = 2048
+    vocab_size: int = 4096
+    compile_model: bool = False
+    batch_size: int = 4
+    gradient_accumulation_steps: int = 2
+    train_tokens: int = 5_000_000
+    muon_lr: float = 0.01
+    adamw_lr: float = 0.002
+    warmup_ratio: float = 0.02
+    weight_decay: float = 0.05
+    use_amp: bool = True
+    eval_steps: int = 10
+    log_every: int = 10

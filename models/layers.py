@@ -1,23 +1,45 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torchtune.modules import RotaryPositionalEmbeddings
 from .components import SquaredReLUFeedForward
 from .compressed_sparse_attention import CompressedSparseAttention
+
+
+def _rotate_half(x: torch.Tensor) -> torch.Tensor:
+    x_even = x[..., ::2]
+    x_odd = x[..., 1::2]
+    rotated = torch.stack((-x_odd, x_even), dim=-1)
+    return rotated.flatten(-2)
 
 
 class Rotary(nn.Module):
     def __init__(self, dim: int, max_seq_len: int):
         super().__init__()
-        self.rope = RotaryPositionalEmbeddings(
-            dim=dim, max_seq_len=max_seq_len, base=10000
-        )
+        if dim % 2 != 0:
+            raise ValueError("Rotary embedding dimension must be even")
+        inv_freq = 1.0 / (10000 ** (torch.arange(0, dim, 2, dtype=torch.float32) / dim))
+        positions = torch.arange(max_seq_len, dtype=torch.float32)
+        freqs = torch.outer(positions, inv_freq)
+        self.register_buffer("cos_cached", torch.cos(freqs), persistent=False)
+        self.register_buffer("sin_cached", torch.sin(freqs), persistent=False)
 
     def forward(self, x_BTHD: torch.Tensor):
-        # x_BTHD shape: [B, T, H, D] - need to convert to [B, T, H, D] for torchtune
-        # torchtune expects [batch, seq_len, num_heads, head_dim]
-        # Our input is already [B, T, H, D] which matches torchtune's expectation
-        return self.rope(x_BTHD)
+        seq_len = x_BTHD.size(1)
+        if seq_len > self.cos_cached.size(0):
+            raise ValueError(
+                f"sequence length {seq_len} exceeds rotary cache {self.cos_cached.size(0)}"
+            )
+        cos = torch.repeat_interleave(
+            self.cos_cached[:seq_len].to(device=x_BTHD.device, dtype=x_BTHD.dtype),
+            2,
+            dim=-1,
+        ).unsqueeze(0).unsqueeze(2)
+        sin = torch.repeat_interleave(
+            self.sin_cached[:seq_len].to(device=x_BTHD.device, dtype=x_BTHD.dtype),
+            2,
+            dim=-1,
+        ).unsqueeze(0).unsqueeze(2)
+        return (x_BTHD * cos) + (_rotate_half(x_BTHD) * sin)
 
 
 class MultiHeadAttention(nn.Module):
@@ -165,6 +187,26 @@ class LocalSlidingWindowAttention(MultiHeadAttention):
 class TransformerBlock(nn.Module):
     """Standard transformer block with dense feed-forward"""
 
+    # -------------------------------------------------------------------------
+    # Novel attention mechanisms (novel_attention.py) — wire in via TransformerBlock
+    # by passing the module instance directly as `attention_module`:
+    #
+    #   from models.novel_attention import EntropyGatedCSA, CrossBlockResidualAttention
+    #   block = TransformerBlock(..., attention_impl="entropy_gated_csa",
+    #                            novel_attention=EntropyGatedCSA(d_model=64, n_heads=4, ...))
+    #
+    # Supported attention_impl strings for novel mechanisms:
+    #   "entropy_gated_csa"       → EntropyGatedCSA
+    #   "cross_block_residual"    → CrossBlockResidualAttention
+    #   "negative_memory"          → NegativeMemoryAttention
+    #   "hebbian_co_activation"    → HebbianCoActivationAttention
+    #   "multi_res_compression"    → MultiResolutionCompressionAttention
+    #
+    # GradientRetentionWrapper and LayerDecayAttention are wrappers — construct them
+    # first, then pass as `attention_module=GradientRetentionWrapper(base, ...)` or
+    # `attention_module=LayerDecayAttention(base, layer_idx=2, total_layers=12)`.
+    # -------------------------------------------------------------------------
+
     def __init__(
         self,
         d_model: int,
@@ -177,6 +219,7 @@ class TransformerBlock(nn.Module):
         csa_config = None,
         forgetting_config = None,
         memory_policy = None,
+        novel_attention = None,
     ):
         super().__init__()
 
@@ -213,22 +256,96 @@ class TransformerBlock(nn.Module):
                 group_hidden_dim=csa_config.group_hidden_dim,
                 dropout=dropout,
             )
-        elif attention_impl in {"forgetting", "age_forgetting"}:
-            if memory_policy is not None:
-                from .memory_policies import AgeForgettingAttention
+        elif attention_impl == "compressed_memory":
+            if memory_policy is None:
+                raise ValueError("memory_policy is required when attention_impl='compressed_memory'")
+            from .memory_policies import CompressedMemoryNoGateAttention
 
-                self.attention = AgeForgettingAttention(
+            self.attention = CompressedMemoryNoGateAttention(
+                d_model=d_model,
+                n_heads=n_heads,
+                max_seq_len=max_seq_len,
+                local_window_size=memory_policy.local_window_size,
+                block_size=memory_policy.block_size,
+                memory_budget_blocks=memory_policy.memory_budget_blocks,
+                dropout=dropout,
+                n_kv_heads=n_kv_heads,
+            )
+        elif attention_impl in {
+            "forgetting",
+            "age_forgetting",
+            "age_forgetting_exponential",
+            "age_forgetting_sigmoid",
+            "age_forgetting_cosine",
+            "age_forgetting_reciprocal",
+            "age_forgetting_hard_cutoff",
+            "random_keyframe",
+            "periodic_keyframe",
+            "learned_router",
+            "salience_memory",
+        }:
+            if memory_policy is not None:
+                from .memory_policies import (
+                    AgeForgettingAttention,
+                    AgeForgettingCosineAttention,
+                    AgeForgettingExponentialAttention,
+                    AgeForgettingHardCutoffAttention,
+                    AgeForgettingReciprocalAttention,
+                    AgeForgettingSigmoidAttention,
+                    LearnedRouterAttention,
+                    PeriodicKeyframeAttention,
+                    RandomKeyframeAttention,
+                    SalienceMemoryAttention,
+                )
+
+                attention_cls = {
+                    "forgetting": AgeForgettingAttention,
+                    "age_forgetting": AgeForgettingAttention,
+                    "age_forgetting_exponential": AgeForgettingExponentialAttention,
+                    "age_forgetting_sigmoid": AgeForgettingSigmoidAttention,
+                    "age_forgetting_cosine": AgeForgettingCosineAttention,
+                    "age_forgetting_reciprocal": AgeForgettingReciprocalAttention,
+                    "age_forgetting_hard_cutoff": AgeForgettingHardCutoffAttention,
+                    "random_keyframe": RandomKeyframeAttention,
+                    "periodic_keyframe": PeriodicKeyframeAttention,
+                    "learned_router": LearnedRouterAttention,
+                    "salience_memory": SalienceMemoryAttention,
+                }[attention_impl]
+
+                attention_kwargs = dict(
                     d_model=d_model,
                     n_heads=n_heads,
                     max_seq_len=max_seq_len,
                     local_window_size=memory_policy.local_window_size,
                     block_size=memory_policy.block_size,
                     memory_budget_blocks=memory_policy.memory_budget_blocks,
-                    age_decay_rate=memory_policy.age_decay_rate,
-                    gate_floor=memory_policy.gate_floor,
                     dropout=dropout,
                     n_kv_heads=n_kv_heads,
                 )
+                if attention_impl in {
+                    "forgetting",
+                    "age_forgetting",
+                    "age_forgetting_exponential",
+                    "age_forgetting_sigmoid",
+                    "age_forgetting_cosine",
+                    "age_forgetting_reciprocal",
+                    "age_forgetting_hard_cutoff",
+                }:
+                    attention_kwargs.update(
+                        age_decay_rate=memory_policy.age_decay_rate,
+                        gate_floor=memory_policy.gate_floor,
+                    )
+                elif attention_impl == "periodic_keyframe":
+                    attention_kwargs.update(periodic_stride=memory_policy.periodic_stride)
+                elif attention_impl == "learned_router":
+                    attention_kwargs.update(
+                        router_hidden_dim=memory_policy.router_hidden_dim,
+                        router_top_k=memory_policy.router_top_k,
+                    )
+                elif attention_impl == "salience_memory":
+                    pass
+
+                self.attention = attention_cls(**attention_kwargs)
             else:
                 if forgetting_config is None:
                     raise ValueError("forgetting_config is required when attention_impl='forgetting'")
@@ -314,6 +431,85 @@ class TransformerBlock(nn.Module):
                 dropout=dropout,
                 n_kv_heads=n_kv_heads,
             )
+        elif attention_impl == "surprise_retention":
+            if memory_policy is None:
+                raise ValueError("memory_policy is required when attention_impl='surprise_retention'")
+            from .new_forgetting import SurpriseRetentionAttention
+
+            self.attention = SurpriseRetentionAttention(
+                d_model=d_model,
+                n_heads=n_heads,
+                max_seq_len=max_seq_len,
+                local_window_size=memory_policy.local_window_size,
+                block_size=memory_policy.block_size,
+                memory_budget_blocks=memory_policy.memory_budget_blocks,
+                surprise_hidden_dim=memory_policy.surprise_hidden_dim,
+                surprise_top_k=memory_policy.surprise_top_k,
+                dropout=dropout,
+                n_kv_heads=n_kv_heads,
+            )
+        elif attention_impl == "frequency_lfu":
+            if memory_policy is None:
+                raise ValueError("memory_policy is required when attention_impl='frequency_lfu'")
+            from .new_forgetting import FrequencyLFUAttention
+
+            self.attention = FrequencyLFUAttention(
+                d_model=d_model,
+                n_heads=n_heads,
+                max_seq_len=max_seq_len,
+                local_window_size=memory_policy.local_window_size,
+                block_size=memory_policy.block_size,
+                memory_budget_blocks=memory_policy.memory_budget_blocks,
+                frequency_top_k=memory_policy.frequency_top_k,
+                dropout=dropout,
+                n_kv_heads=n_kv_heads,
+            )
+        elif attention_impl == "token_merge":
+            if memory_policy is None:
+                raise ValueError("memory_policy is required when attention_impl='token_merge'")
+            from .new_forgetting import TokenMergeAttention
+
+            self.attention = TokenMergeAttention(
+                d_model=d_model,
+                n_heads=n_heads,
+                max_seq_len=max_seq_len,
+                local_window_size=memory_policy.local_window_size,
+                block_size=memory_policy.block_size,
+                memory_budget_blocks=memory_policy.memory_budget_blocks,
+                merge_ratio=memory_policy.token_merge_ratio,
+                dropout=dropout,
+                n_kv_heads=n_kv_heads,
+            )
+        elif attention_impl == "recurrent_state":
+            from .new_forgetting import RecurrentStateAttention
+
+            self.attention = RecurrentStateAttention(
+                d_model=d_model,
+                n_heads=n_heads,
+                max_seq_len=max_seq_len,
+                dropout=dropout,
+                n_kv_heads=n_kv_heads,
+            )
+        elif attention_impl == "entropy_gated_csa":
+            if novel_attention is None:
+                raise ValueError("novel_attention required for entropy_gated_csa")
+            self.attention = novel_attention
+        elif attention_impl == "cross_block_residual":
+            if novel_attention is None:
+                raise ValueError("novel_attention required for cross_block_residual")
+            self.attention = novel_attention
+        elif attention_impl == "negative_memory":
+            if novel_attention is None:
+                raise ValueError("novel_attention required for negative_memory")
+            self.attention = novel_attention
+        elif attention_impl == "hebbian_co_activation":
+            if novel_attention is None:
+                raise ValueError("novel_attention required for hebbian_co_activation")
+            self.attention = novel_attention
+        elif attention_impl == "multi_res_compression":
+            if novel_attention is None:
+                raise ValueError("novel_attention required for multi_res_compression")
+            self.attention = novel_attention
         else:
             raise ValueError(f"Unknown attention_impl: {attention_impl}")
 

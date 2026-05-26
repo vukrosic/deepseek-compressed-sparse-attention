@@ -1,7 +1,5 @@
 datasets
 transformers
-torchtune
-torchao
 matplotlib
 # lm-eval
 

@@ -39,6 +39,47 @@ def print_system_info():
     print(f"PyTorch: {torch.__version__}\n")
 
 
+def _regroup_to_seq_len(ds, target_len: int):
+    """
+    Re-chunk a pre-tokenized dataset to a different sequence length on the fly.
+
+    Used when MAX_SEQ_LEN_OVERRIDE is set and differs from the prep length:
+    we concatenate the existing chunks, then split into target_len blocks.
+    Drops the last partial block. Returns a HuggingFace Dataset with
+    columns input_ids and labels at the new length.
+    """
+    import numpy as np
+    from datasets import Dataset
+
+    arr_ids = np.concatenate([np.asarray(r["input_ids"]) for r in ds])
+    total = arr_ids.shape[0]
+    n_full = total // target_len
+    if n_full == 0:
+        raise RuntimeError(
+            f"Not enough tokens ({total}) to form even one chunk of length {target_len}"
+        )
+    arr_ids = arr_ids[: n_full * target_len].reshape(n_full, target_len)
+    out = Dataset.from_dict({"input_ids": arr_ids, "labels": arr_ids.copy()})
+    out.set_format(type="torch", columns=["input_ids", "labels"])
+    return out
+
+
+def _maybe_regroup(train_ds, val_ds):
+    """If MAX_SEQ_LEN_OVERRIDE is set, regroup both splits to that length."""
+    import os
+    override = os.environ.get("MAX_SEQ_LEN_OVERRIDE")
+    if override is None:
+        return train_ds, val_ds
+    target = int(override)
+    # Only regroup if needed: peek at first row length.
+    first = train_ds[0]["input_ids"]
+    cur_len = first.shape[-1] if hasattr(first, "shape") else len(first)
+    if cur_len == target:
+        return train_ds, val_ds
+    print(f"Regrouping datasets from len={cur_len} → len={target}")
+    return _regroup_to_seq_len(train_ds, target), _regroup_to_seq_len(val_ds, target)
+
+
 def prepare_datasets(data_cfg, tokenizer, cache_dir="./processed_data"):
     import json
     import shutil
@@ -65,7 +106,12 @@ def prepare_datasets(data_cfg, tokenizer, cache_dir="./processed_data"):
                         print(f"  Please re-run data preparation with current max_seq_len:")
                         print(f"    python data/prepare_mix_data.py --target_tokens 25_000_000")
                         print("="*70 + "\n")
-                        raise ValueError(f"max_seq_len mismatch: prepared={prep_max_seq}, config={data_cfg.seq_length}. Run: python data/prepare_mix_data.py --target_tokens 25_000_000 or adjust the number of tokens")
+                        override = os.environ.get("MAX_SEQ_LEN_OVERRIDE")
+                        if override is not None:
+                            print(f"max_seq_len mismatch (prepared={prep_max_seq}, config={data_cfg.seq_length}); "
+                                  f"will regroup chunks on-the-fly via MAX_SEQ_LEN_OVERRIDE={override}")
+                        else:
+                            raise ValueError(f"max_seq_len mismatch: prepared={prep_max_seq}, config={data_cfg.seq_length}. Run: python data/prepare_mix_data.py --target_tokens 25_000_000 or adjust the number of tokens")
                     else:
                         print(f"✓ Validated: Data prepared with max_seq_len={prep_max_seq}")
             except json.JSONDecodeError:
@@ -90,7 +136,7 @@ def prepare_datasets(data_cfg, tokenizer, cache_dir="./processed_data"):
                     if hasattr(ds["train"], 'set_format'):
                         ds["train"].set_format(type="torch", columns=["input_ids", "labels"])
                         ds["val"].set_format(type="torch", columns=["input_ids", "labels"])
-                    return ds["train"], ds["val"]
+                    return _maybe_regroup(ds["train"], ds["val"])
                 elif "train" in ds:
                     # Splitting manually if only train exists
                     print("Found only 'train' split. Creating validation split...")
@@ -98,7 +144,7 @@ def prepare_datasets(data_cfg, tokenizer, cache_dir="./processed_data"):
                     # Set format for both splits
                     splitted["train"].set_format(type="torch", columns=["input_ids", "labels"])
                     splitted["test"].set_format(type="torch", columns=["input_ids", "labels"])
-                    return splitted["train"], splitted["test"]
+                    return _maybe_regroup(splitted["train"], splitted["test"])
             
             # If it's a single Dataset (just rows)
             print("Loaded single dataset. Splitting into train/val...")
@@ -199,6 +245,36 @@ def prepare_datasets(data_cfg, tokenizer, cache_dir="./processed_data"):
     return train_ds, val_ds
 
 
+def infer_vocab_size_from_dataset(train_ds, val_ds=None, multiple: int = 64) -> int:
+    """
+    Infer the minimum embedding size needed for a preprocessed token dataset.
+
+    The returned size is rounded up so the embedding table stays a bit more
+    GPU-friendly than a raw max-token+1 value.
+    """
+    max_token = -1
+    for ds in (train_ds, val_ds):
+        if ds is None:
+            continue
+        for i in range(len(ds)):
+            tokens = ds[i]["input_ids"]
+            if hasattr(tokens, "tolist"):
+                tokens = tokens.tolist()
+            if len(tokens) == 0:
+                continue
+            row_max = max(tokens)
+            if row_max > max_token:
+                max_token = row_max
+
+    if max_token < 0:
+        return 0
+
+    needed = max_token + 1
+    if multiple > 1:
+        needed = ((needed + multiple - 1) // multiple) * multiple
+    return needed
+
+
 def main():
     global _GLOBAL_SEED
     logger = setup_logging(log_dir="./logs")
@@ -231,7 +307,36 @@ def main():
     parser.add_argument("--seed", type=int, default=42, help="Random seed for reproducibility (default: 42)")
     parser.add_argument(
         "--attention_impl",
-        choices=["dense", "local", "csa", "forgetting", "age_forgetting", "usage_refresh", "competition", "hierarchical", "predictive"],
+        choices=[
+            "dense",
+            "local",
+            "csa",
+            "compressed_memory",
+            "forgetting",
+            "age_forgetting",
+            "age_forgetting_exponential",
+            "age_forgetting_sigmoid",
+            "age_forgetting_cosine",
+            "age_forgetting_reciprocal",
+            "age_forgetting_hard_cutoff",
+            "random_keyframe",
+            "periodic_keyframe",
+            "learned_router",
+            "salience_memory",
+            "usage_refresh",
+            "competition",
+            "hierarchical",
+            "predictive",
+            "surprise_retention",
+            "frequency_lfu",
+            "token_merge",
+            "recurrent_state",
+            "entropy_gated_csa",
+            "cross_block_residual",
+            "negative_memory",
+            "hebbian_co_activation",
+            "multi_res_compression",
+        ],
         help="Attention implementation to train",
     )
     parser.add_argument("--csa_compression_block_size", type=int, help="CSA compression block size m")
@@ -253,10 +358,16 @@ def main():
     parser.add_argument("--memory_refresh_strength", type=float, help="Usage refresh strength")
     parser.add_argument("--memory_gate_floor", type=float, help="Minimum memory gate value")
     parser.add_argument("--memory_competition_capacity", type=int, help="Top-k capacity for competition memory")
+    parser.add_argument("--memory_periodic_stride", type=int, help="Stride for periodic keyframe routing")
+    parser.add_argument("--memory_router_hidden_dim", type=int, help="Hidden dim for learned router")
+    parser.add_argument("--memory_router_top_k", type=int, help="Top-k blocks for learned router")
     parser.add_argument("--memory_hierarchy_levels", type=int, help="Hierarchy depth for recursive summaries")
     parser.add_argument("--memory_hierarchy_branching", type=int, help="Hierarchy branching factor")
     parser.add_argument("--memory_predictive_hidden_dim", type=int, help="Hidden dim for predictive scorer")
     parser.add_argument("--memory_predictive_top_k", type=int, help="Top-k blocks for predictive memory")
+    parser.add_argument("--max_seq_len", type=int,
+                        help="Override config.max_seq_len. If the dataset was prepared at a different chunk size, "
+                             "chunks will be assembled / truncated on-the-fly via concat_to_seq_len.")
 
     args = parser.parse_args()
 
@@ -308,6 +419,10 @@ def main():
         config.use_amp = (args.use_amp.lower() == "true")
     if args.attention_impl is not None:
         config.attention_impl = args.attention_impl
+    if args.max_seq_len is not None:
+        config.max_seq_len = args.max_seq_len
+        os.environ["MAX_SEQ_LEN_OVERRIDE"] = str(args.max_seq_len)
+        print(f"max_seq_len override → {args.max_seq_len}")
     if args.csa_compression_block_size is not None:
         config.csa.compression_block_size = args.csa_compression_block_size
     if args.csa_top_k is not None:
@@ -326,12 +441,16 @@ def main():
         config.csa.group_hidden_dim = args.csa_group_hidden_dim
     if args.forgetting_local_window_size is not None:
         config.forgetting.local_window_size = args.forgetting_local_window_size
+        config.memory_policy.local_window_size = args.forgetting_local_window_size
     if args.forgetting_memory_block_size is not None:
         config.forgetting.memory_block_size = args.forgetting_memory_block_size
+        config.memory_policy.block_size = args.forgetting_memory_block_size
     if args.forgetting_memory_decay_rate is not None:
         config.forgetting.memory_decay_rate = args.forgetting_memory_decay_rate
+        config.memory_policy.age_decay_rate = args.forgetting_memory_decay_rate
     if args.forgetting_gate_floor is not None:
         config.forgetting.gate_floor = args.forgetting_gate_floor
+        config.memory_policy.gate_floor = args.forgetting_gate_floor
     if args.memory_local_window_size is not None:
         config.memory_policy.local_window_size = args.memory_local_window_size
     if args.memory_block_size is not None:
@@ -346,6 +465,12 @@ def main():
         config.memory_policy.gate_floor = args.memory_gate_floor
     if args.memory_competition_capacity is not None:
         config.memory_policy.competition_capacity = args.memory_competition_capacity
+    if args.memory_periodic_stride is not None:
+        config.memory_policy.periodic_stride = args.memory_periodic_stride
+    if args.memory_router_hidden_dim is not None:
+        config.memory_policy.router_hidden_dim = args.memory_router_hidden_dim
+    if args.memory_router_top_k is not None:
+        config.memory_policy.router_top_k = args.memory_router_top_k
     if args.memory_hierarchy_levels is not None:
         config.memory_policy.hierarchy_levels = args.memory_hierarchy_levels
     if args.memory_hierarchy_branching is not None:
@@ -356,27 +481,30 @@ def main():
         config.memory_policy.predictive_top_k = args.memory_predictive_top_k
     config.__post_init__()
     
-    # Define custom milestones for validation curves and autosetup logging
-    # For 8M benchmark (approx 488 steps)
-    if config.train_tokens <= 8000000:
-        config.eval_milestones = (0, 50, 100, 150, 200, 300, 400)
-        config.log_every = 50
-        config.eval_every = None  # Only use milestones
-    # For 20M benchmark (approx 1220 steps)
-    elif config.train_tokens <= 20000000:
-        config.eval_milestones = (0, 100, 250, 500, 750, 1000)
-        config.log_every = 100
-        config.eval_every = None
-    # For 100M benchmark (approx 6100 steps)
-    elif config.train_tokens <= 100000000:
-        config.eval_milestones = (0, 500, 1000, 2000, 3000, 4000, 5000)
-        config.log_every = 250
-        config.eval_every = None
-    # For 1B benchmark (approx 61000 steps)
-    else:
-        config.eval_milestones = (0, 1000, 5000, 10000, 20000, 30000, 40000, 50000)
-        config.log_every = 1000
-        config.eval_every = None
+    # Define custom milestones for validation curves and autosetup logging.
+    # If the caller explicitly asked for eval_every, keep that override and do
+    # not replace it with milestone-based logging.
+    if args.eval_every is None:
+        # For 8M benchmark (approx 488 steps)
+        if config.train_tokens <= 8000000:
+            config.eval_milestones = (0, 50, 100, 150, 200, 300, 400)
+            config.log_every = 50
+            config.eval_every = None  # Only use milestones
+        # For 20M benchmark (approx 1220 steps)
+        elif config.train_tokens <= 20000000:
+            config.eval_milestones = (0, 100, 250, 500, 750, 1000)
+            config.log_every = 100
+            config.eval_every = None
+        # For 100M benchmark (approx 6100 steps)
+        elif config.train_tokens <= 100000000:
+            config.eval_milestones = (0, 500, 1000, 2000, 3000, 4000, 5000)
+            config.log_every = 250
+            config.eval_every = None
+        # For 1B benchmark (approx 61000 steps)
+        else:
+            config.eval_milestones = (0, 1000, 5000, 10000, 20000, 30000, 40000, 50000)
+            config.log_every = 1000
+            config.eval_every = None
     
     # Allow command line override ONLY if explicitly provided (argparse default check)
     if args.log_every != 100: # 100 is the default in parser
@@ -439,14 +567,26 @@ def main():
         if not args.dataset_path:
             print(f"📂 Auto-detected dataset: {data_cfg.dataset_path}")
 
-        from data.loader import setup_tokenizer
+        tokenizer = None
+        if not os.path.isdir(data_cfg.dataset_path):
+            from data.loader import setup_tokenizer
 
-        # Setup tokenizer first to get vocab size
-        tokenizer = setup_tokenizer(data_cfg)
-        config.vocab_size = tokenizer.vocab_size
+            # Only inspect the tokenizer when we are preparing raw text.
+            tokenizer = setup_tokenizer(data_cfg)
+            config.vocab_size = tokenizer.vocab_size
 
         # Prepare datasets (handles caching automatically)
         train_ds, val_ds = prepare_datasets(data_cfg, tokenizer)
+
+        if os.path.isdir(data_cfg.dataset_path):
+            inferred_vocab_size = infer_vocab_size_from_dataset(train_ds, val_ds)
+            if inferred_vocab_size > config.vocab_size:
+                print(
+                    f"⚠️  Inferred dataset vocab size {inferred_vocab_size:,} "
+                    f"exceeds model vocab size {config.vocab_size:,}. "
+                    f"Expanding model vocab to match."
+                )
+                config.vocab_size = inferred_vocab_size
 
     device = resolve_device()
     
@@ -474,7 +614,20 @@ def main():
     print(f"d_model: {config.d_model}, layers: {config.n_layers}, heads: {config.n_heads}")
     print(f"ff dim: {config.d_ff}")
     print(f"attention: {config.attention_impl}")
-    if config.attention_impl in {"local", "csa", "forgetting", "age_forgetting", "usage_refresh", "competition", "hierarchical", "predictive"}:
+    age_gate_impls = {
+        "forgetting",
+        "age_forgetting",
+        "age_forgetting_exponential",
+        "age_forgetting_sigmoid",
+        "age_forgetting_cosine",
+        "age_forgetting_reciprocal",
+        "age_forgetting_hard_cutoff",
+        "random_keyframe",
+        "periodic_keyframe",
+        "learned_router",
+        "salience_memory",
+    }
+    if config.attention_impl in {"local", "csa", "compressed_memory", *age_gate_impls, "usage_refresh", "competition", "hierarchical", "predictive", "surprise_retention", "frequency_lfu", "token_merge"}:
         if config.attention_impl == "local":
             print(f"local window: {config.memory_policy.local_window_size}")
     if config.attention_impl == "csa":
@@ -486,7 +639,14 @@ def main():
             f"indexer_heads={config.csa.indexer_heads}, "
             f"groups={config.csa.output_groups}"
         )
-    if config.attention_impl in {"forgetting", "age_forgetting"}:
+    if config.attention_impl == "compressed_memory":
+        print(
+            "compressed_memory: "
+            f"window={config.memory_policy.local_window_size}, "
+            f"block={config.memory_policy.block_size}, "
+            f"budget={config.memory_policy.memory_budget_blocks}"
+        )
+    if config.attention_impl in age_gate_impls:
         print(
             "forgetting: "
             f"window={config.memory_policy.local_window_size}, "
@@ -512,6 +672,37 @@ def main():
             f"budget={config.memory_policy.memory_budget_blocks}, "
             f"capacity={config.memory_policy.competition_capacity}"
         )
+    if config.attention_impl == "random_keyframe":
+        print(
+            "random_keyframe: "
+            f"window={config.memory_policy.local_window_size}, "
+            f"block={config.memory_policy.block_size}, "
+            f"budget={config.memory_policy.memory_budget_blocks}"
+        )
+    if config.attention_impl == "periodic_keyframe":
+        print(
+            "periodic_keyframe: "
+            f"window={config.memory_policy.local_window_size}, "
+            f"block={config.memory_policy.block_size}, "
+            f"budget={config.memory_policy.memory_budget_blocks}, "
+            f"stride={config.memory_policy.periodic_stride}"
+        )
+    if config.attention_impl == "learned_router":
+        print(
+            "learned_router: "
+            f"window={config.memory_policy.local_window_size}, "
+            f"block={config.memory_policy.block_size}, "
+            f"budget={config.memory_policy.memory_budget_blocks}, "
+            f"hidden={config.memory_policy.router_hidden_dim}, "
+            f"top_k={config.memory_policy.router_top_k}"
+        )
+    if config.attention_impl == "salience_memory":
+        print(
+            "salience_memory: "
+            f"window={config.memory_policy.local_window_size}, "
+            f"block={config.memory_policy.block_size}, "
+            f"budget={config.memory_policy.memory_budget_blocks}"
+        )
     if config.attention_impl == "hierarchical":
         print(
             "hierarchical: "
@@ -530,6 +721,41 @@ def main():
             f"hidden={config.memory_policy.predictive_hidden_dim}, "
             f"top_k={config.memory_policy.predictive_top_k}"
         )
+    if config.attention_impl == "surprise_retention":
+        print(
+            "surprise_retention: "
+            f"window={config.memory_policy.local_window_size}, "
+            f"block={config.memory_policy.block_size}, "
+            f"budget={config.memory_policy.memory_budget_blocks}, "
+            f"hidden={config.memory_policy.surprise_hidden_dim}, "
+            f"top_k={config.memory_policy.surprise_top_k}"
+        )
+    if config.attention_impl == "frequency_lfu":
+        print(
+            "frequency_lfu: "
+            f"window={config.memory_policy.local_window_size}, "
+            f"block={config.memory_policy.block_size}, "
+            f"budget={config.memory_policy.memory_budget_blocks}, "
+            f"top_k={config.memory_policy.frequency_top_k}"
+        )
+    if config.attention_impl == "token_merge":
+        print(
+            "token_merge: "
+            f"window={config.memory_policy.local_window_size}, "
+            f"block={config.memory_policy.block_size}, "
+            f"budget={config.memory_policy.memory_budget_blocks}, "
+            f"merge_ratio={config.memory_policy.token_merge_ratio}"
+        )
+    if config.attention_impl == "recurrent_state":
+        print("recurrent_state: linear attention, no block memory")
+    if config.attention_impl in {
+        "entropy_gated_csa",
+        "cross_block_residual",
+        "negative_memory",
+        "hebbian_co_activation",
+        "multi_res_compression",
+    }:
+        print(f"novel attention: {config.attention_impl}")
     print(f"train tokens: {config.train_tokens:,}")
     if getattr(config, "max_train_seconds", None) is not None:
         print(f"max train seconds: {config.max_train_seconds}")
@@ -537,12 +763,103 @@ def main():
     print(f"vocab size: {config.vocab_size}\n")
     logger.info(f"Model configuration: {vars(config)}")
 
+    # Build novel attention module instances for attention_impl strings that use them
+    novel_attention_modules = None
+    if config.attention_impl in {
+        "entropy_gated_csa",
+        "cross_block_residual",
+        "negative_memory",
+        "hebbian_co_activation",
+        "multi_res_compression",
+    }:
+        from models.novel_attention import (
+            EntropyGatedCSA,
+            CrossBlockResidualAttention,
+            NegativeMemoryAttention,
+            HebbianCoActivationAttention,
+            MultiResolutionCompressionAttention,
+        )
+
+        # Shared CSA config values
+        csa = config.csa
+        mp = config.memory_policy
+
+        if config.attention_impl == "entropy_gated_csa":
+            novel_attention_modules = {
+                "entropy_gated_csa": EntropyGatedCSA(
+                    d_model=config.d_model,
+                    n_heads=config.n_heads,
+                    max_seq_len=config.max_seq_len,
+                    compression_block_size=csa.compression_block_size,
+                    top_k=csa.top_k,
+                    sliding_window_size=csa.sliding_window_size,
+                    indexer_heads=csa.indexer_heads,
+                    query_compression_dim=csa.query_compression_dim,
+                    indexer_dim=csa.indexer_dim,
+                    output_groups=csa.output_groups,
+                    group_hidden_dim=csa.group_hidden_dim,
+                )
+            }
+            print(f"novel attention: {config.attention_impl} (block_size={csa.compression_block_size}, top_k={csa.top_k})")
+        elif config.attention_impl == "cross_block_residual":
+            novel_attention_modules = {
+                "cross_block_residual": CrossBlockResidualAttention(
+                    d_model=config.d_model,
+                    n_heads=config.n_heads,
+                    max_seq_len=config.max_seq_len,
+                    local_window_size=mp.local_window_size,
+                    block_size=mp.block_size,
+                    memory_budget_blocks=mp.memory_budget_blocks,
+                )
+            }
+            print(f"novel attention: {config.attention_impl} (window={mp.local_window_size}, block={mp.block_size})")
+        elif config.attention_impl == "negative_memory":
+            novel_attention_modules = {
+                "negative_memory": NegativeMemoryAttention(
+                    d_model=config.d_model,
+                    n_heads=config.n_heads,
+                    max_seq_len=config.max_seq_len,
+                    local_window_size=mp.local_window_size,
+                    block_size=mp.block_size,
+                    memory_budget_blocks=mp.memory_budget_blocks,
+                    negative_pool_size=8,
+                    suppression_strength=0.5,
+                )
+            }
+            print(f"novel attention: {config.attention_impl}")
+        elif config.attention_impl == "hebbian_co_activation":
+            novel_attention_modules = {
+                "hebbian_co_activation": HebbianCoActivationAttention(
+                    d_model=config.d_model,
+                    n_heads=config.n_heads,
+                    max_seq_len=config.max_seq_len,
+                    local_window_size=mp.local_window_size,
+                    block_size=mp.block_size,
+                    memory_budget_blocks=mp.memory_budget_blocks,
+                )
+            }
+            print(f"novel attention: {config.attention_impl}")
+        elif config.attention_impl == "multi_res_compression":
+            novel_attention_modules = {
+                "multi_res_compression": MultiResolutionCompressionAttention(
+                    d_model=config.d_model,
+                    n_heads=config.n_heads,
+                    max_seq_len=config.max_seq_len,
+                    compression_block_sizes=(4, 8, 16),
+                    top_k_per_resolution=4,
+                    sliding_window_size=csa.sliding_window_size,
+                    indexer_heads=csa.indexer_heads,
+                )
+            }
+            print(f"novel attention: {config.attention_impl}")
+
     train_minimal_llm(
-        config, 
-        train_loader, 
-        val_loader, 
-        output_dir=output_dir, 
+        config,
+        train_loader,
+        val_loader,
+        output_dir=output_dir,
         load_weights_path=args.load_checkpoint,
+        novel_attention_modules=novel_attention_modules,
     )
 
 

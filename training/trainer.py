@@ -142,6 +142,7 @@ def train_model(
     train_start_time = time.time()
     metrics_history = {
         'steps': [],
+        'tokens_seen': [],
         'val_losses': [],
         'val_accuracies': [],
         'val_perplexities': [],
@@ -282,6 +283,7 @@ def train_model(
                 
                 # Track metrics
                 metrics_history['steps'].append(step)
+                metrics_history['tokens_seen'].append(tokens_seen)
                 metrics_history['val_losses'].append(eval_metrics['val_loss'])
                 metrics_history['val_accuracies'].append(eval_metrics['val_accuracy'])
                 metrics_history['val_perplexities'].append(eval_metrics['val_perplexity'])
@@ -321,6 +323,7 @@ def train_model(
         current_lr = schedulers[0].get_last_lr()[0] if schedulers else optimizers[0].param_groups[0]['lr']
         
         metrics_history['steps'].append(step)
+        metrics_history['tokens_seen'].append(tokens_seen)
         metrics_history['val_losses'].append(final_eval['val_loss'])
         metrics_history['val_accuracies'].append(final_eval['val_accuracy'])
         metrics_history['val_perplexities'].append(final_eval['val_perplexity'])
@@ -349,6 +352,7 @@ def train_model(
     total_time_seconds = time.time() - train_start_time
     tokens_per_second = tokens_seen / total_time_seconds if total_time_seconds > 0 else 0.0
     peak_cuda_memory_allocated, peak_cuda_memory_reserved = peak_memory_bytes(device)
+    total_parameters = sum(p.numel() for p in model.parameters())
     
     if stopped_early:
         print(f"   ⚠️  Training stopped early at step {step} ({stop_reason or 'unknown'})")
@@ -367,6 +371,7 @@ def train_model(
             'active_training_time_seconds': total_time_seconds,
             'tokens_seen': tokens_seen,
             'tokens_per_second': tokens_per_second,
+            'total_parameters': total_parameters,
             'max_train_seconds': max_train_seconds,
             'stop_reason': stop_reason,
             'peak_cuda_memory_allocated_bytes': peak_cuda_memory_allocated,
@@ -402,6 +407,7 @@ def train_model(
         'steps': step,
         'tokens_seen': tokens_seen,
         'tokens_per_second': tokens_per_second,
+        'total_parameters': total_parameters,
         'max_train_seconds': max_train_seconds,
         'stop_reason': stop_reason,
         'peak_cuda_memory_allocated_bytes': peak_cuda_memory_allocated,
@@ -482,6 +488,7 @@ def train_minimal_llm(
     output_dir: Optional[str] = None,
     load_weights_path: Optional[str] = None,
     compare_baseline: bool = False,
+    novel_attention_modules: Optional[dict[str, nn.Module]] = None,
 ):
     print(f"\n🚀 Training attention research model")
     setup_start = time.time()
@@ -492,7 +499,7 @@ def train_minimal_llm(
     # ============================================
     seed = getattr(config, "seed", 42)
     set_seed(seed)
-    model = MinimalLLM(config)
+    model = MinimalLLM(config, novel_attention_modules=novel_attention_modules)
     use_amp = bool(config.use_amp and device.type == "cuda")
     model = model.to(device, dtype=model_dtype_for_device(device, use_amp))
     
@@ -617,6 +624,7 @@ def train_minimal_llm(
     step = results['steps']
     tokens_seen = results['tokens_seen']
     tokens_per_second = results['tokens_per_second']
+    total_parameters = results['total_parameters']
     peak_cuda_memory_allocated = results['peak_cuda_memory_allocated_bytes']
     peak_cuda_memory_reserved = results['peak_cuda_memory_reserved_bytes']
     stop_reason = results.get('stop_reason')
@@ -650,6 +658,7 @@ def train_minimal_llm(
         'actual_steps': step,
         'tokens_seen': tokens_seen,
         'tokens_per_second': tokens_per_second,
+        'total_parameters': total_parameters,
         'max_train_seconds': getattr(config, 'max_train_seconds', None),
         'stop_reason': stop_reason,
         'peak_cuda_memory_allocated_bytes': peak_cuda_memory_allocated,
