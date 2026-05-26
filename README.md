@@ -2,6 +2,16 @@
 
 Plain PyTorch reference implementations of ten forgetting and memory attention policies, with correctness tests, a reproducible one-GPU sweep, and a short paper.
 
+![Mechanism diagrams](docs/research/results/arch_compare_20260526/mechanism_diagrams.png)
+
+Black regions are visible to the query, gray regions are retained through memory or gating, white regions are forgotten.
+
+## Paper
+
+- **PDF**: [paper.pdf](paper.pdf)
+- **Source**: [docs/research/reports/arch_compare_20260526.tex](docs/research/reports/arch_compare_20260526.tex)
+- **Final plots and results table**: [docs/research/results/forgetting_scaling_latest](docs/research/results/forgetting_scaling_latest)
+
 ## Onboard with an AI agent
 
 Paste this into Claude Code, Cursor, or any agent that can run shell commands. It will set up the environment, fetch the data, and brief you on the project.
@@ -9,9 +19,8 @@ Paste this into Claude Code, Cursor, or any agent that can run shell commands. I
 ```text
 Clone https://github.com/vukrosic/forgetting-attention into the current directory.
 Create a Python venv, install requirements.txt, and download the dataset
-(see the "Data" section of the README). Then read
-docs/research/reports/arch_compare_20260526.pdf along with models/, experiments/,
-and tests/, and tell me:
+(see the "Data" section of the README). Then read paper.pdf along with models/,
+experiments/, and tests/, and tell me:
   1. what the project is about
   2. what each of the ten forgetting mechanisms does, in one sentence each
   3. what the preliminary results say and what they do not say
@@ -19,11 +28,6 @@ and tests/, and tell me:
   5. the most promising next experiments
 Then ask me which experiment I want to run first.
 ```
-
-## Paper
-
-- PDF: [docs/research/reports/arch_compare_20260526.pdf](docs/research/reports/arch_compare_20260526.pdf)
-- Final plots and results table: [docs/research/results/forgetting_scaling_latest](docs/research/results/forgetting_scaling_latest)
 
 ## Policies
 
@@ -78,12 +82,17 @@ Checks shape/dtype, causality, mask correctness, gradient flow, and peak memory 
 bash scripts/run_gpu_sweep.sh
 ```
 
-Runs 11 policies × 3 context lengths (2K/4K/8K) × 300 seconds each on one CUDA GPU. Outputs go to `runs/forgetting_scaling/<timestamp>/`. Rebuild plots with:
+Runs 11 policies × 3 context lengths (2K/4K/8K) × 300 seconds each on one CUDA GPU. Outputs go to `runs/forgetting_scaling/<timestamp>/`. Rebuild plots and the top-level `paper.pdf` with:
 
 ```bash
 python experiments/forgetting_scaling_plot.py \
   runs/forgetting_scaling/<timestamp> \
   --out docs/research/results/forgetting_scaling_latest
+
+cd docs/research/reports
+pdflatex -interaction=nonstopmode arch_compare_20260526.tex
+pdflatex -interaction=nonstopmode arch_compare_20260526.tex
+cp arch_compare_20260526.pdf ../../../paper.pdf
 ```
 
 ## Known limits
