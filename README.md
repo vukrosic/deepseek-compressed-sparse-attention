@@ -1,5 +1,7 @@
 # Forgetting Attention
 
+**Language**: English | [中文](README_zh.md)
+
 Plain PyTorch reference implementations of ten forgetting and memory attention policies, with correctness tests, a reproducible one-GPU sweep, and a short paper.
 
 ![Mechanism diagrams](docs/research/results/arch_compare_20260526/mechanism_diagrams.png)
@@ -8,8 +10,10 @@ Black regions are visible to the query, gray regions are retained through memory
 
 ## Paper
 
-- **PDF**: [paper.pdf](paper.pdf)
-- **Source**: [docs/research/reports/arch_compare_20260526.tex](docs/research/reports/arch_compare_20260526.tex)
+- **PDF (English)**: [paper.pdf](paper.pdf)
+- **PDF (中文)**: [paper_zh.pdf](paper_zh.pdf)
+- **Source (English)**: [docs/research/reports/arch_compare_20260526.tex](docs/research/reports/arch_compare_20260526.tex)
+- **Source (中文)**: [docs/research/reports/arch_compare_20260526_zh.tex](docs/research/reports/arch_compare_20260526_zh.tex)
 - **Final plots and results table**: [docs/research/results/forgetting_scaling_latest](docs/research/results/forgetting_scaling_latest)
 
 ## Onboard with an AI agent
@@ -19,10 +23,16 @@ Paste this into Claude Code, Cursor, or any agent that can run shell commands. I
 ```text
 Clone https://github.com/vukrosic/forgetting-attention into the current directory.
 Create a Python venv, install requirements.txt, and download the dataset
-(see the "Data" section of the README). Then read paper.pdf along with models/,
-experiments/, and tests/, and tell me:
+(see the "Data" section of the README). Then read the paper source at
+docs/research/reports/arch_compare_20260526.tex along with the implementations
+under models/ (especially models/layers.py, models/memory_policies.py,
+models/new_forgetting.py, models/compressed_sparse_attention.py), the sweep at
+experiments/forgetting_scaling_sweep.py, and the correctness suite at
+tests/test_forgetting_mechanisms.py. Ignore anything listed in docs/STALE.md.
+Then tell me:
   1. what the project is about
-  2. what each of the ten forgetting mechanisms does, in one sentence each
+  2. what each of the ten forgetting mechanisms does, in one sentence each,
+     with the file:line where it is defined
   3. what the preliminary results say and what they do not say
   4. the main limitations of the current setup
   5. the most promising next experiments
@@ -31,19 +41,23 @@ Then ask me which experiment I want to run first.
 
 ## Policies
 
-| Policy | Idea |
-|---|---|
-| `dense` | Full causal SDPA (baseline). |
-| `local` | Sliding window, no memory. |
-| `csa` | DeepSeek-style indexer picks top-k compressed blocks. |
-| `compressed_memory` | Block-mean summaries of older tokens. |
-| `age_forgetting` | Linear age-decay gate on compressed blocks. |
-| `hierarchical` | Blocks plus summaries of summaries. |
-| `predictive` | Learned router picks blocks per query. |
-| `surprise_retention` | Keep blocks hardest to predict from their own keys. |
-| `frequency_lfu` | Keep blocks that received past attention mass. |
-| `token_merge` | Merge similar adjacent memory blocks. |
-| `recurrent_state` | Fixed-size linear-attention accumulator. |
+Click any class name to jump straight to its implementation.
+
+| Policy | Idea | Implementation |
+|---|---|---|
+| `dense` | Full causal SDPA (baseline). | [`MultiHeadAttention`](models/layers.py#L45) |
+| `local` | Sliding window, no memory. | [`LocalSlidingWindowAttention`](models/layers.py#L131) |
+| `csa` | DeepSeek-style indexer picks top-k compressed blocks. | [`CompressedSparseAttention`](models/compressed_sparse_attention.py#L193) |
+| `compressed_memory` | Block-mean summaries of older tokens. | [`CompressedMemoryNoGateAttention`](models/memory_policies.py#L607) |
+| `age_forgetting` | Linear age-decay gate on compressed blocks. | [`AgeForgettingAttention`](models/memory_policies.py#L332) |
+| `hierarchical` | Blocks plus summaries of summaries. | [`HierarchicalSummarizationAttention`](models/memory_policies.py#L801) |
+| `predictive` | Learned router picks blocks per query. | [`PredictiveImportanceAttention`](models/memory_policies.py#L919) |
+| `surprise_retention` | Keep blocks hardest to predict from their own keys. | [`SurpriseRetentionAttention`](models/new_forgetting.py#L41) |
+| `frequency_lfu` | Keep blocks that received past attention mass. | [`FrequencyLFUAttention`](models/new_forgetting.py#L158) |
+| `token_merge` | Merge similar adjacent memory blocks. | [`TokenMergeAttention`](models/new_forgetting.py#L273) |
+| `recurrent_state` | Fixed-size linear-attention accumulator. | [`RecurrentStateAttention`](models/new_forgetting.py#L437) |
+
+Other modules in `models/` that are not exercised by the paper (legacy variants, exploratory attentions) are listed in [docs/STALE.md](docs/STALE.md).
 
 ## Install
 
