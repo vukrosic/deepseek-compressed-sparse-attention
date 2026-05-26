@@ -35,7 +35,7 @@
 \definecolor{PaperGray}{HTML}{5B6578}
 \definecolor{PaperLight}{HTML}{F8FAFC}
 
-\title{\vspace{-1.1em}\bfseries 10 Forgetting Attention Policies:\\\large Reference Implementations, Correctness Tests, and Scaling Behavior on an 18M-Class Transformer}
+\title{\vspace{-1.1em}\bfseries 10 Forgetting Attention Mechanisms}
 \author{Vuk Rosic\\\small Independent Research Project}
 \date{May 26, 2026}
 
@@ -43,16 +43,15 @@
 \maketitle
 
 \begin{abstract}
-We study whether simple forgetting and memory policies can improve
-causal attention when implemented as readable PyTorch reference modules.
-We compare dense attention against ten non-dense policies under a fixed
-one-GPU budget, sweeping context lengths from 2K to 8K on an 18M-class
-transformer. In this unfused setup, dense attention has the best loss
-and throughput. The strongest memory
-variants are the simplest ones: block-mean compression, age decay,
-hierarchical summaries, and surprise retention. This paper and code repository provides clearly defined and correctly
-implemented forgetting mechanisms and experiments ready for kernel writers or
-larger-scale follow-up experiments, as well as initial small-scale results.
+We collect ten forgetting and memory policies for causal attention and
+provide a readable PyTorch reference implementation of each, together with
+the training and evaluation infrastructure to scale them to larger models
+and longer budgets. As a preliminary check we run the eleven mechanisms
+(dense plus ten variants) at three context lengths (2K, 4K, 8K) on an
+18M-class transformer under a fixed one-GPU time budget. In this small,
+unfused setup dense attention leads on loss and throughput; among the
+memory variants the simplest ones --- block-mean compression, age decay,
+hierarchical summaries, surprise retention --- cluster at the top.
 \end{abstract}
 
 \begin{figure}[H]
@@ -93,6 +92,7 @@ dropping~\cite{tome}.
 \item Provide a reference implementation of ten forgetting-attention policies
 ready to scale up by kernel writers and follow-up experiments.
 \item Explain each idea clearly with math, code, and a diagram.
+\item Provide preliminary analysis and experiment setup.
 \end{itemize}
 
 \section{Policies Compared}
@@ -182,19 +182,17 @@ seconds.
 
 \section{Results}
 
-The full sweep completed: 33/33 runs finished successfully, with no OOMs
-or runtime failures. Table~\ref{tab:results} gives the complete grid.
-The pattern is consistent across context lengths. Dense attention is the
-best validation-loss baseline and also the fastest path in this
-reference implementation. Local attention is the strongest cheaper
-baseline. The compressed-memory family clusters behind local, and CSA
-and recurrent state are substantially worse under this short training
-budget. Within the forgetting family, simple rules are the strongest:
-age decay and ungated compressed memory are near the top at 2K and 4K,
-while surprise retention is the best compressed-memory variant at 8K.
-The learned predictive router and token-merge variant are weaker here,
-which suggests that extra selection machinery can lose to simpler
-memory rules when the implementation is unfused and the run is short.
+For our setup (one RTX 3090, 18M-class transformer, 300-second budget,
+one seed, unfused PyTorch), the 33-run sweep produces a consistent
+pattern across context lengths. Dense leads on both validation loss and
+throughput. Local is the strongest cheaper baseline. The
+compressed-memory family clusters behind local; CSA and recurrent state
+sit further back under this short budget. Among forgetting rules, the
+simplest ones do best: age decay and ungated compressed memory at 2K
+and 4K, surprise retention at 8K. The learned predictive router and
+token-merge variant are weaker here — a signal that extra selection
+machinery can lose to simpler memory rules in an unfused, short-budget
+setup.
 
 \begin{table}[H]
 \centering
@@ -208,63 +206,37 @@ mechanisms process more tokens inside the time cap.}
 
 \begin{figure}[H]
 \centering
-\begin{subfigure}[t]{0.49\textwidth}
-\centering
-\includegraphics[width=\linewidth]{../results/forgetting_scaling_latest/loss_vs_tokens.png}
-\caption{Validation loss vs tokens seen. This is the fairest curve because
-the sweep is time-capped.}
+\includegraphics[width=\textwidth]{../results/forgetting_scaling_latest/loss_vs_tokens.png}
+\caption{Validation loss vs tokens seen. The fairest curve since the
+sweep is time-capped.}
 \label{fig:val-loss}
-\end{subfigure}
-\hfill
-\begin{subfigure}[t]{0.49\textwidth}
+\end{figure}
+
+\begin{figure}[H]
 \centering
-\includegraphics[width=\linewidth]{../results/forgetting_scaling_latest/loss_vs_time.png}
+\includegraphics[width=\textwidth]{../results/forgetting_scaling_latest/loss_vs_time.png}
 \caption{Validation loss vs active training seconds.}
-\label{fig:tokens}
-\end{subfigure}
-\caption{Token-normalized and time-normalized views of the completed
-sweep. Dense and local dominate the reference implementations in this
-budget regime.}
-\label{fig:main}
+\label{fig:loss-time}
 \end{figure}
 
 \begin{figure}[H]
 \centering
-\begin{subfigure}[t]{0.49\textwidth}
-\centering
-\includegraphics[width=\linewidth]{../results/forgetting_scaling_latest/final_loss_vs_context.png}
-\caption{Final validation loss by context length.}
-\label{fig:final-loss-context}
-\end{subfigure}
-\hfill
-\begin{subfigure}[t]{0.49\textwidth}
-\centering
-\includegraphics[width=\linewidth]{../results/forgetting_scaling_latest/throughput_by_context.png}
-\caption{Throughput by context length.}
+\includegraphics[width=\textwidth]{../results/forgetting_scaling_latest/throughput_by_context.png}
+\caption{Throughput (tokens/second) by context length.}
 \label{fig:throughput-context}
-\end{subfigure}
-\caption{Cost side of the comparison. Longer contexts reduce throughput,
-so time-capped loss must be read together with tokens processed and wall
-time.}
-\label{fig:cost-side}
 \end{figure}
 
 \begin{figure}[H]
 \centering
-\includegraphics[width=0.78\textwidth]{../results/forgetting_scaling_latest/vram_by_context.png}
-\caption{Peak reserved VRAM by context length. This is what tells us
-which mechanisms are likely to fit future kernels or multi-GPU scaling
-work.}
+\includegraphics[width=0.85\textwidth]{../results/forgetting_scaling_latest/vram_by_context.png}
+\caption{Peak reserved VRAM by context length.}
 \label{fig:vram-context}
 \end{figure}
 
-\textbf{Takeaway.} The reference implementations do not show a quality
-win for the forgetting policies. Their value at this stage is
-diagnostic: the tested memory rules are correct and runnable, but the
-unfused compressed-memory path is too slow and too weak to beat the
-simple local baseline. A useful next paper should either improve the
-memory rule enough to beat local in loss-vs-tokens, or write a fused
-kernel and rerun this exact sweep.
+\textbf{Takeaway for our setup.} In this reference run the forgetting
+policies do not beat dense or local. Their value here is diagnostic:
+the rules are correct, runnable, and ranked, so the next iteration
+knows which paths are worth fusing or rerunning at larger scale.
 
 \section{Usefulness for Big Lab Researchers}
 
@@ -277,7 +249,7 @@ larger GPUs. The training script is single-GPU first but the layout,
 config, checkpoints, and metrics files adapt directly to
 \texttt{torchrun}, DDP, or an internal harness.
 
-\section{Honest Limits}
+\section{Limitations}
 
 One seed, one 3090, one dataset, one parameter scale, unfused kernels.
 The numbers describe how each mechanism plateaus on this exact setup.
@@ -303,17 +275,9 @@ strongest candidates to fuse and rerun.
 \section{Next Steps}
 
 \begin{itemize}
-\item Repeat the sweep with three seeds for dense, local, age\_forgetting,
-surprise\_retention, and compressed\_memory.
-\item Write one fused kernel for the most promising compressed-memory
-path and compare it against the plain-PyTorch reference for exactness.
-\item Add a synthetic key-value retrieval task where the answer depends
-on old tokens. For example, place \texttt{key -> value} pairs thousands
-of tokens before a query and measure whether each mechanism retrieves
-the right value. This tests memory usefulness directly instead of only
-through language-model loss.
-\item If a mechanism beats local on loss-vs-tokens, graft that rule into
-the CSA lightning-indexer path and rerun the same table.
+\item Scale compute (larger models, longer budgets, more seeds) and see
+which policies remain promising.
+\item If any survive scaling, write fused kernels for those paths.
 \end{itemize}
 
 \begingroup
