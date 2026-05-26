@@ -35,23 +35,27 @@
 \definecolor{PaperGray}{HTML}{5B6578}
 \definecolor{PaperLight}{HTML}{F8FAFC}
 
-\title{\vspace{-1.1em}\bfseries 10 Forgetting Attention Mechanisms}
-\author{Vuk Rosic\\\small Independent Research Project}
+\title{\vspace{-1.1em}\bfseries Reference Implementations of 10 Forgetting Attention Mechanisms}
+\author{Vuk Rosic\\\small Independent Research Project\\\small Code: \url{https://github.com/vukrosic/forgetting-attention}}
 \date{May 26, 2026}
 
 \begin{document}
 \maketitle
 
 \begin{abstract}
-We collect ten forgetting and memory policies for causal attention and
+We describe and implement ten forgetting and memory policies for causal attention and
 provide a readable PyTorch reference implementation of each, together with
 the training and evaluation infrastructure to scale them to larger models
 and longer budgets. As a preliminary check we run the eleven mechanisms
 (dense plus ten variants) at three context lengths (2K, 4K, 8K) on an
-18M-class transformer under a fixed one-GPU time budget. In this small,
+18M-class LLM transformer for 5 minutes on RTX 3090 each. We also do preliminary experiments. In this small,
 unfused setup dense attention leads on loss and throughput; among the
-memory variants the simplest ones --- block-mean compression, age decay,
-hierarchical summaries, surprise retention --- cluster at the top.
+memory variants the simplest ones - block-mean compression, age decay,
+hierarchical summaries, surprise retention - cluster at the top. Forgetting mechanism
+throughput improves as context length grows: at 2K dense is
+roughly twice as fast as the strongest forgetting mechanism, but at 8K
+the gap closes to about 15\%, suggesting that further scaling could
+flip the ranking in their favor.
 \end{abstract}
 
 \begin{figure}[H]
@@ -103,35 +107,51 @@ attention pattern looks like at the last query position.
 
 \begin{itemize}
 \item \textbf{dense} (classic baseline) --- full causal SDPA with GQA
-and RoPE.
+and RoPE. Every token attends to every earlier token, so cost grows
+quadratically with context length.
 \item \textbf{local} --- sliding window of $W=64$, no memory. Included as
 the isolated baseline so the other policies (which all contain local
 attention plus added memory) can be measured against pure local: does
 the extra memory machinery add value, or is local doing most of the work?
 \item \textbf{compressed\_memory} --- block-mean compression, all blocks
-visible, no gate.
+visible, no gate. Distant context is summarized as the mean of each
+fixed-size block of keys/values, so each query reads a short summary of
+the past plus a fresh local window.
 \item \textbf{csa} --- lightning indexer scores compressed blocks; top
-$k=4$ kept per query (DeepSeek-style compressed sparse attention
-baseline).
+$k=4$ kept per query (DeepSeek V4 compressed sparse attention). A small
+per-query MLP scores block summaries so that only the highest-ranked
+blocks contribute to the output and the rest are masked out.
 \item \textbf{age\_forgetting} --- linear age-decay gate: gate $=1-r\cdot
-\text{age}$ on compressed blocks.
+\text{age}$ on compressed blocks. Older summaries lose weight smoothly
+until they vanish, giving a soft recency prior without committing to a
+hard window cutoff.
 \item \textbf{hierarchical} --- two-level: blocks plus
-super-blocks-of-blocks, each level gated by $1/(\text{level}+1)$.
+super-blocks-of-blocks, each level gated by $1/(\text{level}+1)$. The
+model reads fine local summaries and coarser distant summaries in
+parallel, paying less per token the further back the information lies.
 \item \textbf{predictive} --- small MLP scores blocks per query from
-$(Q, K_b, \text{age})$; top-$k$ kept.
+$(Q, K_b, \text{age})$; top-$k$ kept. Unlike the fixed scoring rules
+above, the router learns end-to-end which blocks each query needs.
 \item \textbf{surprise\_retention} (new) --- per-block, query-independent
 score $s_b = \|V_b - f(K_b)\|^2$ where $f$ is a learned predictor;
-top-$k$ most-surprising blocks kept.
+top-$k$ most-surprising blocks kept. Blocks whose values are easy to
+predict from their own keys are dropped as redundant, so only
+information-rich blocks survive.
 \item \textbf{frequency\_lfu} (new) --- score is the causal cumulative
 sum of past attention mass on each block: blocks the model has actually
-used get retained.
+used get retained. Retention is self-organizing --- usage during
+training determines what stays in memory.
 \item \textbf{token\_merge} (new) --- bipartite content-similarity merge
 on memory: every other block is paired with its neighbor, top-$r$
-most-similar pairs are merged, halving memory length.
+most-similar pairs are merged, halving memory length. Adapted from ToMe
+in vision: redundancy is compressed by merging similar content, not by
+dropping or masking it.
 \item \textbf{recurrent\_state} (new) --- linear-attention with positive
 feature map $\phi$ and causal cumulative state
 $S_t = \sum_{s\leq t} \phi(K_s)\otimes V_s$.
-Memory is $O(d_k^2)$ per layer, independent of $T$.
+Memory is $O(d_k^2)$ per layer, independent of $T$. Past tokens are
+never re-read; they live entirely inside a fixed-size accumulator that
+the model rolls forward each step.
 \end{itemize}
 
 \section{Correctness Suite}
@@ -234,20 +254,28 @@ sweep is time-capped.}
 \end{figure}
 
 \textbf{Takeaway for our setup.} In this reference run the forgetting
-policies do not beat dense or local. Their value here is diagnostic:
-the rules are correct, runnable, and ranked, so the next iteration
-knows which paths are worth fusing or rerunning at larger scale.
+policies do not beat dense or local on either metric. But
+Figure~\ref{fig:throughput-context} shows the throughput gap closing
+fast with context length: at 2K, dense (124K tok/s) is roughly twice as
+fast as the strongest forgetting mechanism; at 4K the gap shrinks to
+about 1.7$\times$; at 8K, dense (46K tok/s) is only about 15\% ahead of
+recurrent state (40K tok/s), and the compressed-memory variants close
+in similarly. Dense scales quadratically with sequence length while the
+forgetting mechanisms scale closer to linearly, so the natural next
+step --- longer contexts or larger models --- is exactly the regime
+where these policies are designed to win on throughput, and where the
+loss-per-second view (Figure~\ref{fig:loss-time}) should flip in their
+favor as a consequence.
 
-\section{Usefulness for Big Lab Researchers}
+\section{Scaling Path}
 
-The codebase is reference material for kernel and scaling work. Each
-policy is a plain-PyTorch module with math in the docstrings, paired
-with a passing causal correctness test. A kernel writer can port a
-policy to Triton or CUDA, A/B it against the reference for exactness,
-keep the same \texttt{metrics.json} schema, and rerun this sweep on
-larger GPUs. The training script is single-GPU first but the layout,
-config, checkpoints, and metrics files adapt directly to
-\texttt{torchrun}, DDP, or an internal harness.
+Each policy is a plain-PyTorch module with math in the docstrings,
+paired with a passing causal correctness test, so a kernel writer can
+port it to Triton or CUDA, A/B against the reference for exactness, and
+rerun the sweep at larger scale. The training script is single-GPU
+first but the config, checkpoints, and \texttt{metrics.json} schema
+adapt to \texttt{torchrun}, DDP, or an internal harness without code
+changes.
 
 \section{Limitations}
 
@@ -260,7 +288,8 @@ ranking.
 
 \section{Output Artifacts}
 
-The four newest mechanisms live in \path{models/new_forgetting.py}, the
+Code: \url{https://github.com/vukrosic/forgetting-attention}. The four
+newest mechanisms live in \path{models/new_forgetting.py}, the
 correctness suite in \path{tests/test_forgetting_mechanisms.py}, and the
 scaling sweep in \path{experiments/forgetting_scaling_sweep.py}.
 
